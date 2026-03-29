@@ -49,10 +49,10 @@
 ### 第一步：创建 Cloudflare D1 数据库
 1. 登录 Cloudflare 控制台，进入 **Workers & Pages** -> **D1 SQL Database**。
 2. 创建一个名为 `probe-db` 的数据库。
-3. 进入该数据库的 **Console (控制台)**，执行以下 SQL 语句来初始化表结构：
+3. 进入该数据库的 **Console (控制台)**，执行以下两个 SQL 语句来初始化表结构：
 
 
--- 创建服务器节点表
+第一个-- 创建服务器节点表
 
 CREATE TABLE servers (
     id TEXT PRIMARY KEY,
@@ -66,7 +66,7 @@ CREATE TABLE servers (
     bandwidth TEXT DEFAULT '', traffic_limit TEXT DEFAULT ''
 );
 
--- 创建全局设置表
+第二个-- 创建全局设置表
 
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
