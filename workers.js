@@ -12,11 +12,6 @@ export default {
       return parseFloat((b / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
     };
 
-    const getFlagEmoji = (countryCode) => {
-      if (!countryCode || countryCode === 'XX') return '🏳️';
-      return String.fromCodePoint(...countryCode.toUpperCase().split('').map(char => 127397 + char.charCodeAt()));
-    };
-
     // ==========================================
     // 0. 认证机制与全局设置加载
     // ==========================================
@@ -46,13 +41,20 @@ export default {
       show_tf: 'true'
     };
 
-    // 尝试从 D1 加载真实设置
     try {
       const { results } = await env.DB.prepare('SELECT * FROM settings').all();
       if (results && results.length > 0) {
         results.forEach(r => sys[r.key] = r.value);
       }
-    } catch (e) {} // 兼容未建表的情况
+    } catch (e) {}
+
+    // 【新增】全局底部栏 HTML (包含 GitHub 和 YouTube 链接)
+    const footerHtml = `
+      <div style="text-align: center; margin-top: 40px; padding-bottom: 20px; font-size: 13px; color: #6b7280;">
+        Powered by <a href="https://github.com/a63414262/CF-Server-Monitor-Pro" target="_blank" style="color: #3b82f6; text-decoration: none; font-weight: 600;">CF-Server-Monitor-Pro</a> | 
+        <a href="https://www.youtube.com/@%E5%B0%8FK%E5%88%86%E4%BA%AB" target="_blank" style="color: #ef4444; text-decoration: none; font-weight: 600;">▶️ 小K分享频道</a>
+      </div>
+    `;
 
     // ==========================================
     // 1. 后台管理 API
@@ -63,7 +65,6 @@ export default {
         const data = await request.json();
         
         if (data.action === 'save_settings') {
-          // 保存全局设置
           for (const [k, v] of Object.entries(data.settings)) {
             await env.DB.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').bind(k, v).run();
           }
@@ -142,16 +143,12 @@ export default {
           .btn { cursor: pointer; border-radius: 4px; font-size: 13px; transition: opacity 0.2s; border: none; padding: 6px 10px; color: white; margin-left: 5px; }
           .btn:hover { opacity: 0.8; }
           .btn-blue { background: #3b82f6; } .btn-green { background: #10b981; } .btn-red { background: #ef4444; }
-          
-          /* 设置区样式 */
           .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
           .form-group { display: flex; flex-direction: column; margin-bottom: 15px; }
           .form-group label { font-size: 14px; font-weight: 600; margin-bottom: 6px; color: #555;}
           .form-group input[type="text"] { padding: 10px; border: 1px solid #ccc; border-radius: 6px; }
           .checkbox-group { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; font-size: 14px;}
           .checkbox-group input { width: 18px; height: 18px; cursor: pointer; }
-          
-          /* Modal Styles */
           .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 100; }
           .modal-content { background: white; padding: 20px; border-radius: 8px; width: 400px; margin: 100px auto; position: relative;}
           .modal input { width: 100%; padding: 8px; margin-bottom: 12px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;}
@@ -176,7 +173,7 @@ export default {
               <label style="font-size: 14px; font-weight: 600; margin-bottom: 10px; display: block; color: #555;">前台展示控制</label>
               <div class="checkbox-group">
                 <input type="checkbox" id="cfg_is_public" ${sys.is_public === 'true' ? 'checked' : ''}>
-                <label for="cfg_is_public"><b>公开访问</b> (取消勾选后，访客必须输入 admin 及密钥才能查看探针)</label>
+                <label for="cfg_is_public"><b>公开访问</b> (取消勾选后，访客必须输入密码才能查看探针)</label>
               </div>
               <div class="checkbox-group">
                 <input type="checkbox" id="cfg_show_price" ${sys.show_price === 'true' ? 'checked' : ''}>
@@ -227,6 +224,8 @@ export default {
             </div>
           </div>
         </div>
+        
+        ${footerHtml}
 
         <script>
           async function saveSettings() {
@@ -245,7 +244,6 @@ export default {
             const res = await fetch('/admin/api', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
             if (res.ok) { alert('✅ 设置已保存！'); location.reload(); } else alert('保存失败');
           }
-
           async function addServer() {
             const name = document.getElementById('newName').value;
             if (!name) return alert('请输入名称');
@@ -289,7 +287,7 @@ export default {
     }
 
     // ==========================================
-    // 3. 一键安装脚本 (/install.sh) (保持不变)
+    // 3. 一键安装脚本 (/install.sh)
     // ==========================================
     if (request.method === 'GET' && url.pathname === '/install.sh') {
       const sh_bin = "/bin" + "/bash";
@@ -460,7 +458,6 @@ echo "✅ 探针安装成功！"
     // 5. 单个服务器详情 JSON API
     // ==========================================
     if (request.method === 'GET' && url.pathname === '/api/server') {
-      // API 请求如果设置了不公开，也需要验证
       if (sys.is_public !== 'true' && !checkAuth(request)) return authResponse(sys.site_title);
       
       const id = url.searchParams.get('id');
@@ -474,8 +471,6 @@ echo "✅ 探针安装成功！"
     // 6. 前台探针首页 & 详情页 (/ )
     // ==========================================
     if (request.method === 'GET' && url.pathname === '/') {
-      
-      // 【核心控制】如果是私密模式，则前台大盘必须输入密码
       if (sys.is_public !== 'true' && !checkAuth(request)) {
         return authResponse(sys.site_title);
       }
@@ -541,6 +536,7 @@ echo "✅ 探针安装成功！"
               <div class="chart-card"><h3>网络速度 <span class="chart-val" style="font-size:14px;"><span style="color:#10b981">↓</span> <span id="text-net-in">0</span> | <span style="color:#3b82f6">↑</span> <span id="text-net-out">0</span></span></h3><canvas id="chartNet"></canvas></div>
               <div class="chart-card"><h3>TCP / UDP <span class="chart-val" style="font-size:14px;">TCP <span id="text-tcp">0</span> | UDP <span id="text-udp">0</span></span></h3><canvas id="chartConn"></canvas></div>
             </div>
+            ${footerHtml}
           </div>
           <script>
             const serverId = "${viewId}";
@@ -620,7 +616,6 @@ echo "✅ 探针安装成功！"
             const cCode = (server.country || 'xx').toLowerCase();
             const flagHtml = cCode !== 'xx' ? `<img src="https://flagcdn.com/24x18/${cCode}.png" alt="${cCode}" style="vertical-align: sub; margin-right: 5px; border-radius: 2px;">` : '🏳️';
             
-            // --- 元数据条件渲染 ---
             let metaHtml = '';
             if (sys.show_price === 'true') {
               metaHtml += `<div class="card-meta" style="margin-top:8px;">价格: ${server.price || '免费'}</div>`;
@@ -637,7 +632,6 @@ echo "✅ 探针安装成功！"
               metaHtml += `<div class="card-meta" style="${sys.show_price !== 'true' ? 'margin-top:8px;' : ''}">剩余天数: ${expireText}</div>`;
             }
 
-            // --- 徽章条件渲染 ---
             let badgesHtml = '';
             if (sys.show_bw === 'true' && server.bandwidth) badgesHtml += `<span class="badge badge-bw">${server.bandwidth}</span>`;
             if (sys.show_tf === 'true' && server.traffic_limit) badgesHtml += `<span class="badge badge-tf">${server.traffic_limit}</span>`;
@@ -718,6 +712,7 @@ echo "✅ 探针安装成功！"
             <div class="g-item"><div class="g-label">实时网速 (入 | 出)</div><div class="g-val"><span style="color:#10b981">↓</span> ${formatBytes(globalSpeedIn)}/s | <span style="color:#3b82f6">↑</span> ${formatBytes(globalSpeedOut)}/s</div></div>
           </div>
           ${contentHtml}
+          ${footerHtml}
         </div>
       </body>
       </html>`;
