@@ -15,7 +15,7 @@
 - **硬核双栈检测**：自动探测并高亮打标 VPS 的 **IPv4** 与 **IPv6** 网络连通性。
 - **商业级自定义徽章**：支持为每台机器单独设置**价格、到期时间（自动计算剩余天数）、带宽上限、流量配额**，并在前台以彩色徽章展示。
 - **精细化分组**：支持在后台为服务器设置组别，前台大盘将自动按分组进行优雅排版。
-- **实时详情图表**：点击任意节点卡片，即可查看基于 Chart.js 的 CPU、内存、磁盘、进程数、TCP/UDP 连接数及双向网速的实时跳动折线图以及三网延迟监控。
+- **实时详情图表**：点击任意节点卡片，即可查看基于 Chart.js 的 CPU、内存、磁盘、进程数、TCP/UDP 连接数及双向网速的实时跳动折线图以及三网延迟监控（来自https://zstaticcdn.com/nodes ）。
 
 ### 🛡️ 隐私与安全控制
 - **一键私密模式**：吃灰神机不想公开？在后台取消勾选“公开访问”，前台访客必须输入 admin 及密钥方可查看你的专属大盘。
@@ -47,7 +47,7 @@
 ### 第一步：创建 Cloudflare D1 数据库
 1. 登录 Cloudflare 控制台，进入 **Workers & Pages** -> **D1 SQL Database**。
 2. 创建一个名为 `probe-db` 的数据库。
-3. 进入该数据库的 **Console (控制台)**，执行以下两个 SQL 语句来初始化表结构：
+3. 进入该数据库的 **Console (控制台)**，执行以下四个 SQL 语句来初始化表结构：
 
 
 第一个-- 创建服务器节点表
@@ -78,7 +78,13 @@ ALTER TABLE servers ADD COLUMN ping_cu TEXT DEFAULT '0';
 ALTER TABLE servers ADD COLUMN ping_cm TEXT DEFAULT '0';
 ALTER TABLE servers ADD COLUMN ping_bd TEXT DEFAULT '0';
 
+第四增加用于月度统计的持久化字段
 
+ALTER TABLE servers ADD COLUMN monthly_rx TEXT DEFAULT '0';
+ALTER TABLE servers ADD COLUMN monthly_tx TEXT DEFAULT '0';
+ALTER TABLE servers ADD COLUMN last_rx TEXT DEFAULT '0';
+ALTER TABLE servers ADD COLUMN last_tx TEXT DEFAULT '0';
+ALTER TABLE servers ADD COLUMN reset_month TEXT DEFAULT '';
 
 ```
 
