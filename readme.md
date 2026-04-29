@@ -48,45 +48,7 @@
 ### 第一步：创建 Cloudflare D1 数据库
 1. 登录 Cloudflare 控制台，进入 **Workers & Pages** -> **D1 SQL Database**。
 2. 创建一个名为 `probe-db` 的数据库。
-3. 进入该数据库的 **Console (控制台)**，执行以下四个 SQL 语句来初始化表结构：
-
-
-第一个-- 创建服务器节点表
-
-CREATE TABLE servers (
-    id TEXT PRIMARY KEY,
-    name TEXT,
-    cpu TEXT, ram TEXT, disk TEXT, load_avg TEXT, uptime TEXT, last_updated INTEGER,
-    ram_total TEXT, net_rx TEXT, net_tx TEXT, net_in_speed TEXT, net_out_speed TEXT,
-    os TEXT, cpu_info TEXT, arch TEXT, boot_time TEXT, ram_used TEXT, swap_total TEXT, 
-    swap_used TEXT, disk_total TEXT, disk_used TEXT, processes TEXT, tcp_conn TEXT, udp_conn TEXT, 
-    country TEXT, ip_v4 TEXT, ip_v6 TEXT,
-    server_group TEXT DEFAULT '默认分组', price TEXT DEFAULT '', expire_date TEXT DEFAULT '', 
-    bandwidth TEXT DEFAULT '', traffic_limit TEXT DEFAULT ''
-);
-
-第二个-- 创建全局设置表
-
-CREATE TABLE IF NOT EXISTS settings (
-    key TEXT PRIMARY KEY,
-    value TEXT
-);
-
-第三创建三网延迟的字段
-
-ALTER TABLE servers ADD COLUMN ping_ct TEXT DEFAULT '0';
-ALTER TABLE servers ADD COLUMN ping_cu TEXT DEFAULT '0';
-ALTER TABLE servers ADD COLUMN ping_cm TEXT DEFAULT '0';
-ALTER TABLE servers ADD COLUMN ping_bd TEXT DEFAULT '0';
-
-第四增加用于月度统计的持久化字段
-
-ALTER TABLE servers ADD COLUMN monthly_rx TEXT DEFAULT '0';
-ALTER TABLE servers ADD COLUMN monthly_tx TEXT DEFAULT '0';
-ALTER TABLE servers ADD COLUMN last_rx TEXT DEFAULT '0';
-ALTER TABLE servers ADD COLUMN last_tx TEXT DEFAULT '0';
-ALTER TABLE servers ADD COLUMN reset_month TEXT DEFAULT '';
-
+3. 数据库热创建与自动迁移,只需创建D1数据库即可
 ```
 
 
