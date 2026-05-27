@@ -214,7 +214,7 @@ body.theme6::before {
 *   ❤️ **背景音乐播放**：实现网易云外链作为背景音乐自动单曲播放。https://music.163.com/song/media/outer/url?id=2616476400.mp3  id=你想替换的网易云音乐的ID即可
 ```html
 <audio id="bgm" autoplay loop preload="auto" style="display:none;">
-    <source src="https://music.163.com/song/media/outer/url?id=33516020.mp3" type="audio/mpeg">
+    <source src="https://music.163.com/song/media/outer/url?id=2616476400.mp3" type="audio/mpeg">
 </audio>
 
 <script>
