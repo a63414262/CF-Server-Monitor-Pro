@@ -1024,7 +1024,7 @@ echo "✅ Linux 探针安装成功！"
             .status-badge { background: #10b981; color: white; padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: bold; }
             .info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; font-size: 14px; }
             .info-item { display: flex; flex-direction: column; }
-            .info-label { color: #6b7280; font-size: 12px; margin-bottom: 4px; }
+            .info-label { color: #6b7280; font-size: 12px; margin-bottom: 4px; white-space: nowrap; }
             .info-value { font-weight: 500; }
             .charts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 20px; }
             .chart-card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
@@ -1335,9 +1335,9 @@ echo "✅ Linux 探针安装成功！"
                     <div style="white-space: nowrap; flex-shrink: 0;">TCP/UDP: ${server.tcp_conn || '0'} / ${server.udp_conn || '0'}</div>
                   </div>
                   
-                  <div style="display: flex; justify-content: space-between; font-size: 11px; color: #888; margin-top: 4px;">
-                    <div><span style="color:#10b981">↓</span> ${netInSpeed}/s</div>
-                    <div><span style="color:#3b82f6">↑</span> ${netOutSpeed}/s</div>
+                  <div style="display: flex; justify-content: space-between; font-size: 11px; color: #888; margin-top: 4px; white-space: nowrap; gap: 8px;">
+                    <div style="overflow: hidden; text-overflow: ellipsis;"><span style="color:#10b981">↓</span> ${netInSpeed}/s</div>
+                    <div style="overflow: hidden; text-overflow: ellipsis;"><span style="color:#3b82f6">↑</span> ${netOutSpeed}/s</div>
                   </div>
                 </div>
               </a>
@@ -1367,10 +1367,10 @@ echo "✅ Linux 探针安装成功！"
                     <span>${disk}%</span>
                   </div>
                 </td>
-                <td style="color:#64748b; font-size:12px;">${rx_val_str} | ${tx_val_str}</td>
-                <td>${netInSpeed}/s</td>
-                <td>${netOutSpeed}/s</td>
-                <td style="color:#64748b; font-size:12px;">${Math.round((now - server.last_updated)/1000)} 秒前</td>
+                <td style="color:#64748b; font-size:12px; white-space: nowrap;">${rx_val_str} | ${tx_val_str}</td>
+                <td style="white-space: nowrap;">${netInSpeed}/s</td>
+                <td style="white-space: nowrap;">${netOutSpeed}/s</td>
+                <td style="color:#64748b; font-size:12px; white-space: nowrap;">${Math.round((now - server.last_updated)/1000)} 秒前</td>
               </tr>
             `;
           }
@@ -1392,9 +1392,9 @@ echo "✅ Linux 探针安装成功！"
           .container { max-width: 1200px; margin: 0 auto; }
           .global-stats { display: flex; flex-wrap: wrap; gap: 20px; justify-content: space-around; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.03); margin-bottom: 30px; text-align: center; }
           .g-item { flex: 1; min-width: 200px; }
-          .g-val { font-size: 24px; font-weight: bold; color: #111; margin: 8px 0; }
-          .g-label { font-size: 13px; color: #666; }
-          .g-sub { font-size: 12px; color: #999; }
+          .g-val { font-size: 24px; font-weight: bold; color: #111; margin: 8px 0; white-space: nowrap; }
+          .g-label { font-size: 13px; color: #666; white-space: nowrap; }
+          .g-sub { font-size: 12px; color: #999; white-space: nowrap; }
           .group-header { font-size: 18px; font-weight: 600; color: #444; margin: 25px 0 15px 5px; border-left: 4px solid #3b82f6; padding-left: 10px; }
           .grid-container { display: grid; grid-template-columns: repeat(auto-fill, minmax(480px, 1fr)); gap: 15px; }
           
