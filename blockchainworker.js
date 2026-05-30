@@ -2,6 +2,12 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const host = url.origin;
+    
+    // ==========================================
+    // 创世时间戳 (Epoch Start)
+    // 设定为 2026-05-30 00:00:00 UTC，区块高度将从这里开始从 1 递增
+    // ==========================================
+    const EPOCH_START = 1780108800000;
 
     // ==========================================
     // 0. 数据库自动化热创建与无缝升级 (Auto Migration & Web3 Setup)
@@ -242,7 +248,8 @@ export default {
 
     const mineAndGossip = async (localAsset, localVpsCount) => {
         try {
-            const currentSlot = Math.floor(Date.now() / 3000); 
+            // 修正出块高度，从 EPOCH_START 开始计算
+            const currentSlot = Math.max(1, Math.floor((Date.now() - EPOCH_START) / 3000));
             const hash = await miniHash(`${currentSlot}-${host}`);
             
             if (hash.endsWith('0')) {
@@ -251,7 +258,7 @@ export default {
                 
                 const { results: beacons } = await env.DB.prepare(`SELECT domain FROM blockchain_peers WHERE is_beacon = 'true' AND domain != ? ORDER BY reputation_score DESC LIMIT 3`).bind(host).all();
                 for (const b of beacons) {
-                    fetch(`${b.domain}/api/consensus/submit`, { method: 'POST', body: JSON.stringify(blockData) }).catch(() => {});
+                    fetch(`${b.domain}/api/consensus/submit`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(blockData) }).catch(() => {});
                 }
                 await env.DB.prepare(`INSERT OR REPLACE INTO blockchain_ledger (slot_id, proposer_domain, block_hash, payload, timestamp) VALUES (?, ?, ?, ?, ?)`).bind(currentSlot, host, hash, payloadStr, Date.now()).run();
             }
@@ -437,13 +444,15 @@ export default {
       .stat-bar > div { height: 100%; border-radius: 2px; transition: width 0.3s; }
       
       /* Web3 Consensus Panel UI */
-      .consensus-panel { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; background: rgba(16, 185, 129, 0.05); border: 1px solid rgba(16, 185, 129, 0.2); padding: 12px 20px; border-radius: 10px; margin-bottom: 20px; font-family: monospace; }
+      .consensus-panel { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; background: rgba(16, 185, 129, 0.05); border: 1px solid rgba(16, 185, 129, 0.2); padding: 15px 20px; border-radius: 12px; margin-bottom: 25px; font-family: monospace; }
       .theme2 .consensus-panel, .theme5 .consensus-panel { background: rgba(88, 166, 255, 0.05); border-color: rgba(88, 166, 255, 0.2); }
-      .c-label { font-size: 11px; color: #64748b; text-transform: uppercase; margin-bottom: 2px; }
-      .c-val { font-size: 16px; font-weight: bold; color: #10b981; }
+      .c-label { font-size: 12px; color: #64748b; text-transform: uppercase; margin-bottom: 4px; font-weight: 600; }
+      .c-val { font-size: 18px; font-weight: bold; color: #10b981; }
       .theme2 .c-val, .theme5 .c-val { color: #58a6ff; }
-      .ticker-bar { width: 100%; height: 4px; background: #e2e8f0; margin-top: 5px; border-radius: 2px; overflow: hidden; }
+      .ticker-bar { width: 100%; height: 4px; background: #e2e8f0; margin-top: 8px; border-radius: 2px; overflow: hidden; }
       .ticker-fill { height: 100%; background: #10b981; transition: width 0.1s linear; }
+      .theme2 .ticker-bar, .theme5 .ticker-bar { background: #30363d; }
+      .theme2 .ticker-fill, .theme5 .ticker-fill { background: #58a6ff; }
     `;
 
     // ==========================================
@@ -460,7 +469,7 @@ export default {
           }
           if (data.settings.is_beacon === 'true') {
               ctx.waitUntil(fetch('https://black-violet-065c.a624587332.workers.dev/api/consensus/register', {
-                  method: 'POST', body: JSON.stringify({ domain: host, is_beacon: 'true' })
+                  method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ domain: host, is_beacon: 'true' })
               }).catch(()=>{}));
           }
           return new Response(JSON.stringify({ success: true }), { headers: { 'Content-Type': 'application/json' } });
@@ -1821,7 +1830,6 @@ echo "✅ Linux 探针安装成功！热重载功能已启用。"
 
         last_rx = current_rx; last_tx = current_tx;
 
-        // 提取并更新历史数据
         let history = {};
         try { history = JSON.parse(serverExists.history || '{}'); } catch(e) {}
         
@@ -2198,18 +2206,30 @@ echo "✅ Linux 探针安装成功！热重载功能已启用。"
         }
       }
 
-      // Web3 获取去中心化排名 (纯本地区块链账本查询)
-      let localRank = '--';
+      // Web3 获取去中心化排名 (本地动态对比)
+      let localRank = 1;
       let globalNetAsset = totalAsset;
       let globalProposer = '--';
       let currentHeight = 0;
       let activeBeacons = 0;
       
       try {
-          const { results: rankList } = await env.DB.prepare('SELECT domain, total_asset FROM blockchain_peers ORDER BY total_asset DESC').all();
-          const rIndex = rankList.findIndex(r => r.domain === host);
-          if (rIndex !== -1) localRank = rIndex + 1;
-          globalNetAsset = rankList.reduce((sum, item) => sum + (item.total_asset || 0), 0);
+          const { results: rankList } = await env.DB.prepare('SELECT domain, total_asset FROM blockchain_peers').all();
+          
+          let higherCount = 0;
+          let otherAssets = 0;
+          
+          for (const p of rankList) {
+              if (p.domain !== host) {
+                  otherAssets += (p.total_asset || 0);
+                  if ((p.total_asset || 0) > totalAsset) {
+                      higherCount++;
+                  }
+              }
+          }
+          
+          localRank = higherCount + 1;
+          globalNetAsset = totalAsset + otherAssets;
           
           const latestBlock = await env.DB.prepare('SELECT slot_id, proposer_domain FROM blockchain_ledger ORDER BY slot_id DESC LIMIT 1').first();
           if (latestBlock) {
@@ -2395,36 +2415,7 @@ echo "✅ Linux 探针安装成功！热重载功能已启用。"
         <script id="map-data" type="application/json">${JSON.stringify(countryStats)}</script>
         ${sys.custom_head || ''}
         <style>
-          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #f4f5f7; color: #333; margin: 0; padding: 20px; }
-          .container { max-width: 1200px; margin: 0 auto; }
-          
-          .global-stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.03); margin-bottom: 30px; text-align: center; box-sizing: border-box; width: 100%; align-items: center; }
-          .g-item { min-width: 0; box-sizing: border-box; }
-          .g-val { font-size: 22px; font-weight: bold; color: #111; margin: 8px 0; line-height: 1.2; word-break: break-word; white-space: normal; }
-          .g-label { font-size: 13px; color: #666; white-space: normal; line-height: 1.4; }
-          .g-sub { font-size: 12px; color: #999; white-space: normal; line-height: 1.4; }
-          @media (max-width: 768px) { .global-stats { grid-template-columns: 1fr; } }
-          
-          .group-header { font-size: 18px; font-weight: 600; color: #444; margin: 25px 0 15px 5px; border-left: 4px solid #3b82f6; padding-left: 10px; }
-          .grid-container { display: grid; grid-template-columns: repeat(auto-fill, minmax(480px, 1fr)); gap: 15px; }
-          
-          .vps-card { display: flex; justify-content: space-between; align-items: stretch; background: white; padding: 18px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); text-decoration: none; color: inherit; border: 1px solid transparent; transition: all 0.2s ease; }
-          .vps-card:hover { border-color: #e5e7eb; transform: translateY(-2px); box-shadow: 0 8px 15px rgba(0,0,0,0.08); }
-          .card-left { flex: 0 0 180px; display: flex; flex-direction: column; justify-content: center; }
-          .card-title { display: flex; align-items: center; margin-bottom: 4px; }
-          .card-title-text { font-weight: 600; }
-          .status-dot { width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; flex-shrink:0; }
-          .card-meta { font-size: 12px; color: #6b7280; margin-bottom: 3px; }
-          .card-badges { margin-top: 10px; display: flex; gap: 5px; flex-wrap: wrap; }
-          .badge { padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 600; color: white; }
-          .badge-bw { background: #3b82f6; } .badge-tf { background: #10b981; } .badge-v4 { background: #a855f7; } .badge-v6 { background: #ec4899; }
-          
-          .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }
-          .admin-btn { padding: 8px 16px; background: #3b82f6; color: white; text-decoration: none; border-radius: 6px; font-size: 14px; font-weight:bold; }
-          @media (max-width: 800px) { .grid-container { grid-template-columns: 1fr; } .vps-card { flex-direction: column; } .card-right { padding-left: 0; border-left: none; border-top: 1px solid #f0f0f0; margin-top: 15px; padding-top: 15px; } .header { flex-direction: column; align-items: flex-start; gap: 15px;} .header-right { width:100%; justify-content: space-between;} }
-          
           ${themeStyles}
-
           /* Web3 Consensus Panel UI */
           .consensus-panel { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; background: rgba(16, 185, 129, 0.05); border: 1px solid rgba(16, 185, 129, 0.2); padding: 15px 20px; border-radius: 12px; margin-bottom: 25px; font-family: monospace; }
           .theme2 .consensus-panel, .theme5 .consensus-panel { background: rgba(88, 166, 255, 0.05); border-color: rgba(88, 166, 255, 0.2); }
@@ -2435,28 +2426,23 @@ echo "✅ Linux 探针安装成功！热重载功能已启用。"
           .ticker-fill { height: 100%; background: #10b981; transition: width 0.1s linear; }
           .theme2 .ticker-bar, .theme5 .ticker-bar { background: #30363d; }
           .theme2 .ticker-fill, .theme5 .ticker-fill { background: #58a6ff; }
+          
+          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #f4f5f7; color: #333; margin: 0; padding: 20px; }
+          .container { max-width: 1200px; margin: 0 auto; }
+          .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }
+          .admin-btn { padding: 8px 16px; background: #3b82f6; color: white; text-decoration: none; border-radius: 6px; font-size: 14px; font-weight:bold; }
+          .global-stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.03); margin-bottom: 30px; text-align: center; box-sizing: border-box; width: 100%; align-items: center; }
+          .g-item { min-width: 0; box-sizing: border-box; }
+          .g-val { font-size: 22px; font-weight: bold; color: #111; margin: 8px 0; line-height: 1.2; word-break: break-word; white-space: normal; }
+          .g-label { font-size: 13px; color: #666; white-space: normal; line-height: 1.4; }
         </style>
       </head>
       <body class="${sys.theme || 'theme1'}">
         <div class="container" id="app-container">
           
-          <div class="header" style="flex-wrap: wrap; gap: 15px;">
+          <div class="header">
             <h1 style="margin:0;">${sys.site_title}</h1>
-            
-            <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
-              <div class="view-controls">
-                <button class="toggle-btn active" id="btn-card" onclick="switchView('card')">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg> 卡片
-                </button>
-                <button class="toggle-btn" id="btn-table" onclick="switchView('table')">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg> 表格
-                </button>
-                <button class="toggle-btn" id="btn-map" onclick="switchView('map')">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"></polygon><line x1="9" y1="3" x2="9" y2="21"></line><line x1="15" y1="3" x2="15" y2="21"></line></svg> 地图
-                </button>
-              </div>
-              <a href="/admin" class="admin-btn">${sys.admin_title}</a>
-            </div>
+            <a href="/admin" class="admin-btn">${sys.admin_title}</a>
           </div>
 
           <div class="consensus-panel" id="web3-dashboard">
@@ -2516,10 +2502,12 @@ echo "✅ Linux 探针安装成功！热重载功能已启用。"
           let mapInitialized = false;
           window.currentFilter = 'all';
 
-          // Web3 前端 3 秒区块心脏跳动 Ticker
+          // Web3 前端 3 秒区块心脏跳动 Ticker (完美对齐后端 Epoch)
+          const EPOCH_START = ${EPOCH_START};
           setInterval(() => {
               const now = Date.now();
-              const remMs = 3000 - (now % 3000);
+              const elapsed = Math.max(0, now - EPOCH_START);
+              const remMs = 3000 - (elapsed % 3000);
               document.getElementById('ui-ticker').innerText = (remMs / 1000).toFixed(1);
               document.getElementById('ui-ticker-bar').style.width = (remMs / 3000 * 100) + '%';
           }, 100);
@@ -2703,9 +2691,7 @@ echo "✅ Linux 探针安装成功！热重载功能已启用。"
               
               drawMarkers();
               applyFilter(); 
-            } catch (e) {
-              console.log('Ajax Refresh Failed', e);
-            }
+            } catch (e) {}
           }, 4000);
         </script>
         
