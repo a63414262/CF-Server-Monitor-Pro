@@ -86,6 +86,10 @@ export default {
       show_expire: 'true',
       show_bw: 'true',
       show_tf: 'true',
+      show_asset: 'false',
+      asset_currency: '元',
+      enable_ranking: 'false',
+      ranking_api: '',
       tg_notify: 'false',
       tg_bot_token: '',
       tg_chat_id: '',
@@ -342,7 +346,7 @@ export default {
         }
       }
 
-      // 处理节点列表渲染数据 (包含 IPv4 市级 与 双栈 省级)
+      // 这里完全保留原始提供的所有节点数据
       const rawNodeDataV4 = `陕西西安移动
 sn-xian-cm-v4.ip.zstaticcdn.com:443
 江苏无锡移动
@@ -1016,11 +1020,11 @@ cq-ct-dualstack.ip.zstaticcdn.com:80`;
           const line = lines[i];
           if (line.includes('移动') || line.includes('联通') || line.includes('电信')) {
             const name = `${line} (${label})`;
-            const host = (lines[i+1] || '').split(':')[0]; // 剥离端口保证curl正常测试
+            const host = (lines[i+1] || '').split(':')[0]; 
             if (line.includes('电信')) pingOpts.ct.push({name, host});
             else if (line.includes('联通')) pingOpts.cu.push({name, host});
             else if (line.includes('移动')) pingOpts.cm.push({name, host});
-            i++; // 跳过紧跟的host行
+            i++; 
           }
         }
       };
@@ -1054,7 +1058,7 @@ cq-ct-dualstack.ip.zstaticcdn.com:80`;
           .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
           .form-group { display: flex; flex-direction: column; margin-bottom: 15px; }
           .form-group label { font-size: 14px; font-weight: 600; margin-bottom: 6px; color: #555;}
-          .form-group input[type="text"], .form-group select, .form-group input[type="date"] { padding: 10px; border: 1px solid #ccc; border-radius: 6px; }
+          .form-group input[type="text"], .form-group select, .form-group input[type="date"], .form-group input[type="number"] { padding: 10px; border: 1px solid #ccc; border-radius: 6px; }
           .form-group textarea { padding: 10px; border: 1px solid #ccc; border-radius: 6px; font-family: monospace; font-size: 12px; resize: vertical; line-height: 1.4; background: #fafafa;}
           .checkbox-group { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; font-size: 14px;}
           .checkbox-group input { width: 18px; height: 18px; cursor: pointer; }
@@ -1148,6 +1152,26 @@ cq-ct-dualstack.ip.zstaticcdn.com:80`;
                 <label for="cfg_show_tf">在前台显示 <b>流量配额徽章</b></label>
               </div>
 
+              <hr style="margin: 15px 0; border: none; border-top: 1px dashed #ccc;">
+              <div class="checkbox-group">
+                <input type="checkbox" id="cfg_show_asset" ${sys.show_asset === 'true' ? 'checked' : ''}>
+                <label for="cfg_show_asset">在前台和卡片显示 <b>数字资产价值</b> (总价与剩余价值，强制换算为CNY)</label>
+              </div>
+              <div class="form-group" style="margin-left: 28px; margin-top: -5px; margin-bottom: 5px;">
+                <label style="font-size: 12px;">资产货币展示单位 (默认：元)</label>
+                <input type="text" id="cfg_asset_currency" value="${sys.asset_currency || '元'}" style="width: 120px; padding: 6px;">
+              </div>
+              
+              <div class="checkbox-group" style="margin-top: 10px;">
+                <input type="checkbox" id="cfg_enable_ranking" onchange="toggleRankingApi()" ${sys.enable_ranking === 'true' ? 'checked' : ''}>
+                <label for="cfg_enable_ranking">在前台显示 <b>全网排名</b> (需配置中心化排行榜API)</label>
+              </div>
+              <div class="form-group" id="ranking_api_group" style="display: ${sys.enable_ranking === 'true' ? 'block' : 'none'}; margin-left: 28px; margin-top: -5px; margin-bottom: 15px;">
+                <label style="font-size: 12px;">排行中心 API 地址</label>
+                <input type="text" id="cfg_ranking_api" value="${sys.ranking_api || ''}" placeholder="如: https://api.yoursite.com/rank" style="width: 250px; padding: 6px;">
+                <span style="font-size:12px; color:#888;">* Worker隔离限制，需外部API汇总所有人数据，提供服务器与资产排名响应。</span>
+              </div>
+
               <hr style="margin: 20px 0; border: none; border-top: 1px dashed #ccc;">
               <label style="font-size: 14px; font-weight: 600; margin-bottom: 10px; display: block; color: #e63946;">✈️ Telegram 离线告警设置</label>
               <div class="form-group">
@@ -1221,7 +1245,7 @@ cq-ct-dualstack.ip.zstaticcdn.com:80`;
               <option value="alpine">Alpine Linux (OpenRC/Ash)</option>
             </select>
             <label>分组名称</label> <input type="text" id="editGroup" placeholder="如：美国 VPS">
-            <label>价格</label> <input type="text" id="editPrice" placeholder="如：40USD/Year 或 免费">
+            <label>价格 (支持外币识别如: 10USD/月, 5EUR/年)</label> <input type="text" id="editPrice" placeholder="如：10USD/Year 或 免费">
             <label>到期时间</label> <input type="date" id="editExpire">
             <label>带宽 (前端徽章)</label> <input type="text" id="editBandwidth" placeholder="如：1Gbps 或 200Mbps">
             <label>流量总量 (前端徽章)</label> <input type="text" id="editTraffic" placeholder="如：1TB/月">
@@ -1238,6 +1262,9 @@ cq-ct-dualstack.ip.zstaticcdn.com:80`;
           function toggleCustomCss() {
             const theme = document.getElementById('cfg_theme').value;
             document.getElementById('custom_css_group').style.display = theme === 'theme6' ? 'flex' : 'none';
+          }
+          function toggleRankingApi() {
+            document.getElementById('ranking_api_group').style.display = document.getElementById('cfg_enable_ranking').checked ? 'block' : 'none';
           }
 
           function uploadBg(input) {
@@ -1272,6 +1299,10 @@ cq-ct-dualstack.ip.zstaticcdn.com:80`;
                 show_expire: document.getElementById('cfg_show_expire').checked ? 'true' : 'false',
                 show_bw: document.getElementById('cfg_show_bw').checked ? 'true' : 'false',
                 show_tf: document.getElementById('cfg_show_tf').checked ? 'true' : 'false',
+                show_asset: document.getElementById('cfg_show_asset').checked ? 'true' : 'false',
+                asset_currency: document.getElementById('cfg_asset_currency').value || '元',
+                enable_ranking: document.getElementById('cfg_enable_ranking').checked ? 'true' : 'false',
+                ranking_api: document.getElementById('cfg_ranking_api').value,
                 tg_notify: document.getElementById('cfg_tg_notify').value,
                 tg_bot_token: document.getElementById('cfg_tg_bot_token').value,
                 tg_chat_id: document.getElementById('cfg_tg_chat_id').value,
@@ -1335,7 +1366,7 @@ cq-ct-dualstack.ip.zstaticcdn.com:80`;
     }
 
     // ==========================================
-    // 一键安装脚本 (/install.sh) - 完美兼容 Alpine/ash 和 Systemd/bash
+    // 一键安装脚本 (/install.sh)
     // ==========================================
     if (request.method === 'GET' && url.pathname === '/install.sh') {
       let reportInterval = '5';
@@ -1535,7 +1566,6 @@ chmod +x /usr/local/bin/cf-probe.sh
 
 `;
 
-      // 差异化安装守护进程
       if (osType === 'alpine') {
         bashScript += `cat << 'EOF' > /etc/init.d/cf-probe
 #!/sbin/openrc-run
@@ -1625,7 +1655,6 @@ echo "✅ Linux 探针安装成功！热重载功能已启用。"
         const nowMs = Date.now();
         const lastHistTime = history.last_time || 0;
         
-        // 5分钟记录一次历史数据 (288点 = 24小时)
         if (nowMs - lastHistTime >= 300000 || !history.time) {
             const maxPoints = 288; 
             const updateArr = (arr, val) => {
@@ -1685,7 +1714,6 @@ echo "✅ Linux 探针安装成功！热重载功能已启用。"
 
         ctx.waitUntil(checkOfflineNodes());
         
-        // 返回包含最新配置的纯文本，供探针热更新 (避免使用 JQ 以保证最大系统兼容性)
         return new Response(`INTERVAL=${sys.report_interval || '5'}|CT=${sys.ping_node_ct || 'default'}|CU=${sys.ping_node_cu || 'default'}|CM=${sys.ping_node_cm || 'default'}`, { status: 200 });
       } catch (e) {
         return new Response('Error', { status: 400 });
@@ -1713,12 +1741,8 @@ echo "✅ Linux 探针安装成功！热重载功能已启用。"
         return authResponse(sys.site_title);
       }
 
-      // ==========================================
-      // 访问量统计逻辑 (避免 Ajax/接口 刷新被意外记录)
-      // ==========================================
       const isAjax = url.searchParams.get('ajax') === '1';
       if (!isAjax) {
-        // 使用东八区时间计算当前日期
         const nowTime = new Date();
         const tzOffset = 8 * 60 * 60000; 
         const localNow = new Date(nowTime.getTime() + tzOffset);
@@ -1730,27 +1754,23 @@ echo "✅ Linux 探针安装成功！热重载功能已启用。"
         
         vTotal++;
         if (vDate !== todayStr) {
-            vToday = 1; // 跨天重置
+            vToday = 1; 
             vDate = todayStr;
         } else {
             vToday++;
         }
         
-        // 更新内存状态，保证页面能立即渲染最新数值
         sys.visits_total = vTotal.toString();
         sys.visits_today = vToday.toString();
         sys.visits_date = todayStr;
 
-        // 通过 waitUntil 后台静默保存到 D1 数据库，不阻塞页面返回
         const updateVisits = async () => {
             try {
                 await env.DB.prepare(`
                     INSERT INTO settings (key, value) VALUES ('visits_total', ?), ('visits_today', ?), ('visits_date', ?)
                     ON CONFLICT(key) DO UPDATE SET value = excluded.value
                 `).bind(vTotal.toString(), vToday.toString(), todayStr).run();
-            } catch(e) {
-                console.error("更新访问量失败", e);
-            }
+            } catch(e) {}
         };
         ctx.waitUntil(updateVisits());
       }
@@ -1947,7 +1967,6 @@ echo "✅ Linux 探针安装成功！热重载功能已启用。"
       // 大盘聚合首页 (包含卡片、表格、地图功能)
       // ----------------------------------------
       let { results } = await env.DB.prepare('SELECT * FROM servers').all();
-      // 在首页、表格和地图中过滤掉隐藏节点
       results = results.filter(s => s.is_hidden !== 'true');
 
       const now = Date.now();
@@ -1955,6 +1974,8 @@ echo "✅ Linux 探针安装成功！热重载功能已启用。"
       let globalOnline = 0; let globalOffline = 0;
       let globalSpeedIn = 0; let globalSpeedOut = 0;
       let globalNetTx = 0; let globalNetRx = 0;
+      let totalAsset = 0; let remAsset = 0;
+      
       const groups = {};
       const countryStats = {}; 
 
@@ -1977,6 +1998,56 @@ echo "✅ Linux 探针安装成功！热重载功能已启用。"
           globalNetTx += tx_val;
           globalNetRx += rx_val;
 
+          // ==========================================
+          // 资产强制转换为 CNY 汇率核心逻辑
+          // ==========================================
+          let amount = 0;
+          let remValue = 0;
+          if (server.price && server.price.match(/[\d.]+/)) {
+              let rawAmount = parseFloat(server.price.match(/[\d.]+/)[0]) || 0;
+              let rate = 1;
+              const pUpper = server.price.toUpperCase();
+              
+              if (pUpper.includes('USD') || pUpper.includes('$')) rate = 7.23;
+              else if (pUpper.includes('EUR') || pUpper.includes('€')) rate = 7.85;
+              else if (pUpper.includes('GBP') || pUpper.includes('£')) rate = 9.12;
+              else if (pUpper.includes('HKD')) rate = 0.92;
+              else if (pUpper.includes('JPY')) rate = 0.048;
+              else if (pUpper.includes('TWD')) rate = 0.22;
+              else if (pUpper.includes('RUB')) rate = 0.078;
+              else if (pUpper.includes('CAD')) rate = 5.25;
+              else if (pUpper.includes('AUD')) rate = 4.75;
+              // 匹配不到上述单位即默认为原值(当作CNY)
+
+              amount = rawAmount * rate;
+              
+              let cycleDays = 365; // 默认按年计算
+              const priceStr = server.price.toLowerCase();
+              if (priceStr.includes('月') || priceStr.includes('mo') || priceStr.includes('month')) cycleDays = 30;
+              else if (priceStr.includes('季') || priceStr.includes('qu')) cycleDays = 90;
+              else if (priceStr.includes('半年') || priceStr.includes('half')) cycleDays = 180;
+              else if (priceStr.includes('天') || priceStr.includes('day')) cycleDays = 1;
+              
+              let expDays = -1;
+              if (server.expire_date) {
+                  const expTime = new Date(server.expire_date).getTime();
+                  if (!isNaN(expTime)) {
+                      const diff = expTime - now;
+                      expDays = diff > 0 ? Math.ceil(diff / (1000 * 3600 * 24)) : 0;
+                  }
+              }
+              
+              if (expDays === -1) {
+                  remValue = amount; // 永久视为满额剩余价值
+              } else {
+                  remValue = (amount / cycleDays) * expDays;
+              }
+          }
+          totalAsset += amount;
+          remAsset += remValue;
+          server._remValue = remValue;
+          server._amount = amount;
+
           const grpName = server.server_group || '默认分组';
           if (!groups[grpName]) groups[grpName] = [];
           groups[grpName].push(server);
@@ -1987,6 +2058,16 @@ echo "✅ Linux 探针安装成功！热重载功能已启用。"
               countryStats[cCodeMap] = (countryStats[cCodeMap] || 0) + 1;
           }
         }
+      }
+
+      // ==========================================
+      // 生成全网排名的徽章占位符
+      // ==========================================
+      let rankHtmlServer = '';
+      let rankHtmlAsset = '';
+      if (sys.enable_ranking === 'true') {
+          rankHtmlServer = `<span id="ajax-rank-server" style="font-size:12px;color:#f59e0b;font-weight:bold;margin-left:5px;" title="全网排名">(加载排名...)</span>`;
+          rankHtmlAsset = `<span id="ajax-rank-asset" style="font-size:12px;color:#f59e0b;font-weight:bold;margin-left:5px;" title="全网排名">(加载排名...)</span>`;
       }
 
       let filterTagsHtml = `<span class="filter-tag" data-code="all" onclick="setFilter('all')">全部 ${results.length}</span>`;
@@ -2018,7 +2099,11 @@ echo "✅ Linux 探针安装成功！热重载功能已启用。"
             
             let metaHtml = '';
             if (sys.show_price === 'true') {
-              metaHtml += `<div class="card-meta" style="margin-top:8px;">价格: ${server.price || '免费'}</div>`;
+              let priceHtml = `价格: ${server.price || '免费'}`;
+              if (sys.show_asset === 'true' && server._amount > 0) {
+                  priceHtml += ` <span style="color:#8b5cf6;font-weight:600;margin-left:8px;">剩余价值: ${server._remValue.toFixed(2)}${sys.asset_currency || '元'}</span>`;
+              }
+              metaHtml += `<div class="card-meta" style="margin-top:8px;">${priceHtml}</div>`;
             }
             if (sys.show_expire === 'true') {
               let expireText = '永久';
@@ -2050,7 +2135,6 @@ echo "✅ Linux 探针安装成功！热重载功能已启用。"
 
             const pingHtml = `<div class="ping-box"><span>电信 <span style="color:${getColor(server.ping_ct)}; font-weight:bold;">${server.ping_ct === '0' ? '超时' : server.ping_ct + 'ms'}</span></span><span>联通 <span style="color:${getColor(server.ping_cu)}; font-weight:bold;">${server.ping_cu === '0' ? '超时' : server.ping_cu + 'ms'}</span></span><span>移动 <span style="color:${getColor(server.ping_cm)}; font-weight:bold;">${server.ping_cm === '0' ? '超时' : server.ping_cm + 'ms'}</span></span><span>字节 <span style="color:${getColor(server.ping_bd)}; font-weight:bold;">${server.ping_bd === '0' ? '超时' : server.ping_bd + 'ms'}</span></span></div>`;
 
-            // 处理容量的显示
             const ramUsedStr = formatBytes((parseFloat(server.ram_used || 0) * 1048576).toString());
             const ramTotalStr = formatBytes((parseFloat(server.ram_total || 0) * 1048576).toString());
             const diskUsedStr = formatBytes((parseFloat(server.disk_used || 0) * 1048576).toString());
@@ -2147,11 +2231,15 @@ echo "✅ Linux 探针安装成功！热重载功能已启用。"
         <style>
           body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #f4f5f7; color: #333; margin: 0; padding: 20px; }
           .container { max-width: 1200px; margin: 0 auto; }
-          .global-stats { display: flex; flex-wrap: wrap; gap: 20px; justify-content: space-around; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.03); margin-bottom: 30px; text-align: center; }
-          .g-item { flex: 1; min-width: 200px; }
-          .g-val { font-size: 24px; font-weight: bold; color: #111; margin: 8px 0; white-space: nowrap; }
-          .g-label { font-size: 13px; color: #666; white-space: nowrap; }
-          .g-sub { font-size: 12px; color: #999; white-space: nowrap; }
+          
+          /* 强制改为两列(2行)网格布局，彻底解决挤出和换行错乱问题 */
+          .global-stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.03); margin-bottom: 30px; text-align: center; box-sizing: border-box; width: 100%; align-items: center; }
+          .g-item { min-width: 0; box-sizing: border-box; }
+          .g-val { font-size: 22px; font-weight: bold; color: #111; margin: 8px 0; line-height: 1.2; word-break: break-word; white-space: normal; }
+          .g-label { font-size: 13px; color: #666; white-space: normal; line-height: 1.4; }
+          .g-sub { font-size: 12px; color: #999; white-space: normal; line-height: 1.4; }
+          @media (max-width: 768px) { .global-stats { grid-template-columns: 1fr; } }
+          
           .group-header { font-size: 18px; font-weight: 600; color: #444; margin: 25px 0 15px 5px; border-left: 4px solid #3b82f6; padding-left: 10px; }
           .grid-container { display: grid; grid-template-columns: repeat(auto-fill, minmax(480px, 1fr)); gap: 15px; }
           
@@ -2200,7 +2288,8 @@ echo "✅ Linux 探针安装成功！热重载功能已启用。"
           </div>
 
           <div class="global-stats" id="ajax-stats">
-            <div class="g-item"><div class="g-label">服务器总数</div><div class="g-val">${results.length}</div><div class="g-sub">在线 <span style="color:#10b981">${globalOnline}</span> | 离线 <span style="color:#ef4444">${globalOffline}</span></div></div>
+            <div class="g-item"><div class="g-label">服务器总数</div><div class="g-val">${results.length} ${rankHtmlServer}</div><div class="g-sub">在线 <span style="color:#10b981">${globalOnline}</span> | 离线 <span style="color:#ef4444">${globalOffline}</span></div></div>
+            ${sys.show_asset === 'true' ? `<div class="g-item"><div class="g-label">数字资产 (${sys.asset_currency || '元'})</div><div class="g-val">${totalAsset.toFixed(2)} <span style="font-size:16px;color:#888;">总</span> | ${remAsset.toFixed(2)} <span style="font-size:16px;color:#888;">余</span> ${rankHtmlAsset}</div></div>` : ''}
             <div class="g-item"><div class="g-label">总计流量 (入 | 出) ${sys.auto_reset_traffic === 'true' ? '<span style="font-size:10px; color:#c2410c;">(本月)</span>' : ''}</div><div class="g-val">${formatBytes(globalNetRx)} | ${formatBytes(globalNetTx)}</div></div>
             <div class="g-item"><div class="g-label">实时网速 (入 | 出)</div><div class="g-val"><span style="color:#10b981">↓</span> ${formatBytes(globalSpeedIn)}/s | <span style="color:#3b82f6">↑</span> ${formatBytes(globalSpeedOut)}/s</div></div>
           </div>
@@ -2234,6 +2323,36 @@ echo "✅ Linux 探针安装成功！热重载功能已启用。"
         <script>
           let mapInitialized = false;
           window.currentFilter = 'all';
+
+          // ==========================================
+          // 异步中心API交互：静默获取本站的全网排名
+          // ==========================================
+          let currentServerRank = '';
+          let currentAssetRank = '';
+
+          if ('${sys.enable_ranking}' === 'true' && '${sys.ranking_api}') {
+              const fetchRank = async () => {
+                  try {
+                      const res = await fetch('${sys.ranking_api}', {
+                          method: 'POST',
+                          headers: {'Content-Type': 'application/json'},
+                          body: JSON.stringify({ domain: window.location.hostname, servers: ${results.length}, assets: ${totalAsset} })
+                      });
+                      const data = await res.json();
+                      if(data.server_rank) currentServerRank = '🏆 第 ' + data.server_rank + ' 名';
+                      if(data.asset_rank) currentAssetRank = '🏆 第 ' + data.asset_rank + ' 名';
+                      
+                      const elS = document.getElementById('ajax-rank-server');
+                      if(elS && currentServerRank) elS.innerHTML = currentServerRank;
+                      
+                      const elA = document.getElementById('ajax-rank-asset');
+                      if(elA && currentAssetRank) elA.innerHTML = currentAssetRank;
+                  } catch(e) {
+                      console.log('Rank fetch failed:', e);
+                  }
+              };
+              fetchRank();
+          }
 
           function switchView(viewName) {
             document.querySelectorAll('.toggle-btn').forEach(btn => btn.classList.remove('active'));
@@ -2379,7 +2498,6 @@ echo "✅ Linux 探针安装成功！热重载功能已启用。"
              applyFilter();
           });
 
-          // 【新增修改】：为了防止 AJAX 自动刷新导致后端访问量虚高，每次自动刷新强制带上 ?ajax=1 标记
           setInterval(async () => {
             try {
               const currentUrl = new URL(location.href);
@@ -2395,8 +2513,19 @@ echo "✅ Linux 探针安装成功！热重载功能已启用。"
               document.getElementById('ajax-filters').innerHTML = newDoc.getElementById('ajax-filters').innerHTML;
               
               document.getElementById('map-data').textContent = newDoc.getElementById('map-data').textContent;
+              
+              // DOM 刷新后重新填充已获取的排名
+              if (currentServerRank) {
+                  const elS = document.getElementById('ajax-rank-server');
+                  if (elS) elS.innerHTML = currentServerRank;
+              }
+              if (currentAssetRank) {
+                  const elA = document.getElementById('ajax-rank-asset');
+                  if (elA) elA.innerHTML = currentAssetRank;
+              }
+
               drawMarkers();
-              applyFilter(); // 刷新后重新应用当前的过滤状态
+              applyFilter(); 
             } catch (e) {
               console.log('Ajax Refresh Failed', e);
             }
