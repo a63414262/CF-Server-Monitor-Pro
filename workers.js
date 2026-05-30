@@ -244,7 +244,8 @@ export default {
       .os-text { color: #64748b; font-size: 12px; }
       .table-responsive { width: 100%; overflow-x: auto; }
       .filter-bar { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
-      .filter-tag { display: inline-flex; align-items: center; gap: 5px; background: white; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; color: #475569; box-shadow: 0 1px 3px rgba(0,0,0,0.05); border: 1px solid transparent; cursor:pointer;}
+      .filter-tag { display: inline-flex; align-items: center; gap: 5px; background: white; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; color: #475569; box-shadow: 0 1px 3px rgba(0,0,0,0.05); border: 1px solid transparent; cursor:pointer; transition: all 0.2s;}
+      .filter-tag:hover { background: #f1f5f9; }
       .filter-tag.active { background: #3b82f6; color: white; border-color: #3b82f6; }
       #map-container { width: 100%; height: 500px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); overflow: hidden; border: 1px solid #e5e7eb; background-color: #b1c2d4; background-image: linear-gradient(rgba(255,255,255,0.2) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.2) 1px, transparent 1px); background-size: 20px 20px; z-index: 1; }
       body.theme2 #map-container, body.theme5 #map-container { background-color: #0d1117; background-image: linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px); border-color: #30363d; }
@@ -1115,6 +1116,7 @@ cq-ct-dualstack.ip.zstaticcdn.com:80`;
               <div class="form-group">
                 <label>⏱️ Agent 上报间隔 (秒)</label>
                 <input type="number" id="cfg_report_interval" value="${sys.report_interval || '5'}" min="1" max="120" placeholder="默认 5 秒">
+                <span style="font-size:12px; color:#ef4444; margin-top:5px; display:block; font-weight:bold;">* 友情提示：间隔越短，消耗的 Worker 每日请求次数越多。如果 VPS 较多，建议将上报间隔增大至 60-100 秒。</span>
               </div>
             </div>
             <div>
@@ -1987,9 +1989,9 @@ echo "✅ Linux 探针安装成功！热重载功能已启用。"
         }
       }
 
-      let filterTagsHtml = `<span class="filter-tag active">全部 ${results.length}</span>`;
+      let filterTagsHtml = `<span class="filter-tag" data-code="all" onclick="setFilter('all')">全部 ${results.length}</span>`;
       for (const [code, count] of Object.entries(countryStats)) {
-          filterTagsHtml += `<span class="filter-tag"><img src="https://flagcdn.com/16x12/${code.toLowerCase()}.png" alt="${code}"> ${code} ${count}</span>`;
+          filterTagsHtml += `<span class="filter-tag" data-code="${code.toLowerCase()}" onclick="setFilter('${code.toLowerCase()}')"><img src="https://flagcdn.com/16x12/${code.toLowerCase()}.png" alt="${code}"> ${code} ${count}</span>`;
       }
 
       let cardContentHtml = '';
@@ -2055,7 +2057,7 @@ echo "✅ Linux 探针安装成功！热重载功能已启用。"
             const diskTotalStr = formatBytes((parseFloat(server.disk_total || 0) * 1048576).toString());
 
             cardContentHtml += `
-              <a href="/?id=${server.id}" class="vps-card">
+              <a href="/?id=${server.id}" class="vps-card" data-country="${cCode}">
                 <div class="card-left">
                   <div class="card-title">
                     <div class="status-dot" style="background:${statusColor};"></div>
@@ -2099,7 +2101,7 @@ echo "✅ Linux 探针安装成功！热重载功能已启用。"
             `;
 
             tableBodyHtml += `
-              <tr onclick="window.location.href='/?id=${server.id}'" style="cursor:pointer;">
+              <tr onclick="window.location.href='/?id=${server.id}'" style="cursor:pointer;" data-country="${cCode}">
                 <td style="text-align:center;"><div class="status-dot" style="background:${statusColor}; display:inline-block; margin:0;"></div></td>
                 <td><b>${server.name}</b></td>
                 <td>${flagHtml}</td>
@@ -2231,6 +2233,7 @@ echo "✅ Linux 探针安装成功！热重载功能已启用。"
         
         <script>
           let mapInitialized = false;
+          window.currentFilter = 'all';
 
           function switchView(viewName) {
             document.querySelectorAll('.toggle-btn').forEach(btn => btn.classList.remove('active'));
@@ -2249,6 +2252,44 @@ echo "✅ Linux 探针安装成功！热重载功能已启用。"
                 window.myMap.invalidateSize(); 
               }
             }
+          }
+
+          function setFilter(code) {
+              window.currentFilter = code;
+              applyFilter();
+          }
+
+          function applyFilter() {
+              if(!window.currentFilter) window.currentFilter = 'all';
+              
+              document.querySelectorAll('.filter-tag').forEach(el => {
+                  if (el.dataset.code === window.currentFilter) el.classList.add('active');
+                  else el.classList.remove('active');
+              });
+              
+              document.querySelectorAll('.vps-card').forEach(el => {
+                  if (window.currentFilter === 'all' || el.dataset.country === window.currentFilter) {
+                      el.style.display = 'flex';
+                  } else {
+                      el.style.display = 'none';
+                  }
+              });
+              
+              document.querySelectorAll('#ajax-table tr').forEach(el => {
+                  if (window.currentFilter === 'all' || el.dataset.country === window.currentFilter) {
+                      el.style.display = '';
+                  } else {
+                      el.style.display = 'none';
+                  }
+              });
+
+              document.querySelectorAll('.group-header').forEach(header => {
+                  const grid = header.nextElementSibling;
+                  if (grid && grid.classList.contains('grid-container')) {
+                      const visibleCards = Array.from(grid.querySelectorAll('.vps-card')).filter(el => el.style.display !== 'none');
+                      header.style.display = visibleCards.length > 0 ? 'block' : 'none';
+                  }
+              });
           }
 
           let markersLayer;
@@ -2335,6 +2376,7 @@ echo "✅ Linux 探针安装成功！热重载功能已启用。"
           document.addEventListener('DOMContentLoaded', () => {
              const savedView = localStorage.getItem('monitor_preferred_view') || 'card';
              switchView(savedView);
+             applyFilter();
           });
 
           // 【新增修改】：为了防止 AJAX 自动刷新导致后端访问量虚高，每次自动刷新强制带上 ?ajax=1 标记
@@ -2354,6 +2396,7 @@ echo "✅ Linux 探针安装成功！热重载功能已启用。"
               
               document.getElementById('map-data').textContent = newDoc.getElementById('map-data').textContent;
               drawMarkers();
+              applyFilter(); // 刷新后重新应用当前的过滤状态
             } catch (e) {
               console.log('Ajax Refresh Failed', e);
             }
