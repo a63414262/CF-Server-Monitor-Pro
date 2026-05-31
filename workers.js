@@ -237,7 +237,8 @@ export default {
                 return true;
             } catch (e) {
                 if (attempt === maxRetries - 1) throw e;
-                await new Promise(r => setTimeout(r, 50 * Math.pow(2, attempt))); 
+                // 引入 Math.random() * 50 增加防死锁抖动 (Jitter)
+                await new Promise(r => setTimeout(r, 100 * Math.pow(2, attempt) + Math.random() * 50)); 
             }
         }
         return false;
@@ -303,25 +304,6 @@ export default {
         } catch(e) {}
         
         return { amount: amount || 0, remValue: remValue || 0 };
-    };
-
-    globalThis.txBuffer = globalThis.txBuffer || [];
-    globalThis.txBufferTimer = globalThis.txBufferTimer || null;
-
-    const flushTxBuffer = async () => {
-        if (globalThis.txBuffer.length === 0) return;
-        const txs = [...globalThis.txBuffer];
-        globalThis.txBuffer = []; 
-        
-        const batchStmts = txs.map(tx => 
-            env.DB.prepare(`INSERT OR IGNORE INTO mempool (tx_id, payload, timestamp) VALUES (?, ?, ?)`).bind(tx.id, JSON.stringify(tx), tx.timestamp)
-        );
-        
-        if (batchStmts.length > 0) {
-            for (let i = 0; i < batchStmts.length; i += 50) {
-                await executeBatchWithRetry(batchStmts.slice(i, i + 50));
-            }
-        }
     };
 
     const getBootstrapPeers = async () => {
@@ -597,7 +579,6 @@ export default {
             if (sys.is_beacon !== 'true') return consensusResponse('Not a beacon', 403);
             try {
                 const block = await request.json();
-                if (block.timestamp) ctx.waitUntil(updateNetworkTimeOffset(block.timestamp));
 
                 const currentSlot = Math.max(1, Math.floor((getNetworkTime() - EPOCH_START) / SLOT_TIME));
                 if (parseInt(block.slot_id) > currentSlot + 3) return consensusResponse('Block from future rejected', 400);
@@ -699,15 +680,9 @@ export default {
                 const wallet = await env.DB.prepare('SELECT balance FROM blockchain_wallets WHERE address = ?').bind(tx.from).first();
                 if (!wallet || wallet.balance < tx.amount) throw new Error("Insufficient balance");
 
-                globalThis.txBuffer.push(tx);
-                if (!globalThis.txBufferTimer) {
-                    globalThis.txBufferTimer = true;
-                    ctx.waitUntil((async () => {
-                        await new Promise(r => setTimeout(r, 500));
-                        await flushTxBuffer();
-                        globalThis.txBufferTimer = false;
-                    })());
-                }
+                // 直接插入 D1 数据库 Mempool，解决多节点沙箱隔离问题
+                await env.DB.prepare(`INSERT OR IGNORE INTO mempool (tx_id, payload, timestamp) VALUES (?, ?, ?)`).bind(tx.id, JSON.stringify(tx), tx.timestamp).run();
+
                 return consensusResponse('Tx Accepted', 202);
             } catch(e) { return consensusResponse('Tx Reject: ' + e.message, 400); }
         }
@@ -1095,15 +1070,8 @@ export default {
 
           const txData = { id: crypto.randomUUID(), type: 'TRANSFER', from: data.from, to: data.to, amount: amountNum, timestamp: getNetworkTime() };
           
-          globalThis.txBuffer.push(txData);
-          if (!globalThis.txBufferTimer) {
-              globalThis.txBufferTimer = true;
-              ctx.waitUntil((async () => {
-                  await new Promise(r => setTimeout(r, 500));
-                  await flushTxBuffer();
-                  globalThis.txBufferTimer = false;
-              })());
-          }
+          // 直接写入数据库，放弃容易内存泄漏且无法跨实例同步的全局变量 txBuffer
+          await env.DB.prepare(`INSERT OR IGNORE INTO mempool (tx_id, payload, timestamp) VALUES (?, ?, ?)`).bind(txData.id, JSON.stringify(txData), txData.timestamp).run();
           
           ctx.waitUntil((async () => {
               const { results: beacons } = await env.DB.prepare(`SELECT domain FROM blockchain_peers WHERE is_beacon IN ('true', '1') AND domain != ? ORDER BY reputation_score DESC LIMIT 4`).bind(host).all();
@@ -1526,7 +1494,7 @@ export default {
                       body: JSON.stringify({ action: 'send_tx', from: fromInput, to: to, amount: amount }) 
                   });
                   if (res.ok) {
-                      alert('🚀 交易已发送至内存池，等待网络打包出块结算！');
+                      alert('🚀 交易已直接写入数据库 Mempool！网络将自动打包出块。');
                       closeTxModal();
                   } else {
                       const err = await res.json();
