@@ -3,7 +3,7 @@
 // ==========================================
 const PROTOCOL_VERSION = 'v14_pure_chain'; // 🚀 V14 大一统净化协议：已稳定出块
 const EPOCH_START = 1780239482981; 
-const GENESIS_NODE = 'https://tanzhen.800620.xyz'; // 以你的主站为锚点
+const GENESIS_NODE = 'https://odd-art-043f.a68561918.workers.dev'; // 以你的主站为锚点
 const DEFAULT_SEEDS = [
     GENESIS_NODE,
     'https://odd-art-043f.a68561918.workers.dev',
