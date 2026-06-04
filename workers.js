@@ -18,9 +18,33 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const host = url.origin;
+
+    // ==========================================
+    // 0. 全局 Ajax 限流与防刷熔断保护 (工业级限流阀)
+    // ==========================================
+    const isAjax = url.searchParams.get('ajax') === '1';
+    const currentGlobalTime = Date.now();
+    if (!globalThis.ajaxCounterResetTime || currentGlobalTime - globalThis.ajaxCounterResetTime > 60000) {
+        globalThis.ajaxCounter = 0;
+        globalThis.ajaxCounterResetTime = currentGlobalTime;
+    }
+    if (isAjax) {
+        globalThis.ajaxCounter = (globalThis.ajaxCounter || 0) + 1;
+        // 如果 1 分钟内全局 Ajax 请求超过 5000 次，直接触发 429 降频，强制大盘等待 5 分钟 (300秒)
+        if (globalThis.ajaxCounter > 5000) {
+            return new Response('Overloaded: Please backoff', { 
+                status: 429, 
+                headers: { 
+                    'Content-Type': 'text/plain',
+                    'X-Refresh-Interval': '300', 
+                    'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate'
+                } 
+            });
+        }
+    }
     
     // ==========================================
-    // 0. 数据库自动化热创建与终极索引初始化
+    // 1. 数据库自动化热创建与终极索引初始化
     // ==========================================
     let isDbReady = globalThis.dbInitialized;
     if (!isDbReady) {
@@ -213,7 +237,7 @@ export default {
       is_public: 'true', show_price: 'true', show_expire: 'true', show_bw: 'true', show_tf: 'true',
       show_asset: 'false', asset_currency: '元', is_beacon: 'true', enable_ranking: 'false', ranking_api: '',
       tg_notify: 'false', tg_bot_token: '', tg_chat_id: '',
-      auto_reset_traffic: 'false', report_interval: '60',
+      auto_reset_traffic: 'false',
       ping_node_ct: 'default', ping_node_cu: 'default', ping_node_cm: 'default',
       miner_wallet: '', ping_nodes_list: ''
     };
@@ -236,7 +260,7 @@ export default {
       
       if (!response) {
         if (!globalThis.configCache) {
-           globalThis.configCache = JSON.stringify({ INTERVAL: parseInt(sys.report_interval || '60'), CT: sys.ping_node_ct, CU: sys.ping_node_cu, CM: sys.ping_node_cm });
+           globalThis.configCache = JSON.stringify({ CT: sys.ping_node_ct, CU: sys.ping_node_cu, CM: sys.ping_node_cm });
         }
         let configData = globalThis.configCache;
         response = new Response(configData, {
@@ -1183,9 +1207,6 @@ export default {
       .stat-bar > div { height: 100%; border-radius: 2px; transition: width 0.3s; }
     `;
 
-    // ==========================================
-    // 后台管理 API (/admin/api)
-    // ==========================================
     if (request.method === 'POST' && url.pathname === '/admin/api') {
       if (!checkAuth(request)) return authResponse(sys.admin_title);
       try {
@@ -1197,12 +1218,13 @@ export default {
           }
 
           const configPayload = {
-            INTERVAL: parseInt(data.settings.report_interval || '60'),
             CT: data.settings.ping_node_ct || 'default',
             CU: data.settings.ping_node_cu || 'default',
             CM: data.settings.ping_node_cm || 'default'
           };
           globalThis.configCache = JSON.stringify(configPayload); 
+          
+          globalThis.sysCache = null; 
 
           const cache = caches.default;
           ctx.waitUntil(cache.delete(new Request(`${host}/config.json`)));
@@ -1264,9 +1286,6 @@ export default {
       }
     }
 
-    // ==========================================
-    // 后台管理 UI (/admin)
-    // ==========================================
     if (request.method === 'GET' && url.pathname === '/admin') {
       if (!checkAuth(request)) return authResponse(sys.admin_title);
       
@@ -1459,10 +1478,6 @@ export default {
                 <label>后台标签栏名称</label>
                 <input type="text" id="cfg_admin_title" value="${sys.admin_title}">
               </div>
-              <div class="form-group">
-                <label>⏱️ Agent 上报间隔 (秒)</label>
-                <input type="number" id="cfg_report_interval" value="${sys.report_interval || '60'}" min="1" max="300" placeholder="默认 60 秒">
-              </div>
             </div>
             <div>
               <label style="font-size: 14px; font-weight: 600; margin-bottom: 10px; display: block; color: #555;">👁️ 前台展示控制</label>
@@ -1504,6 +1519,15 @@ export default {
               </div>
 
               <hr style="margin: 20px 0; border: none; border-top: 1px dashed #ccc;">
+              <div style="background: #f8fafc; padding: 12px; border-radius: 6px; border: 1px solid #e2e8f0; margin-bottom: 15px;">
+                <label style="font-size: 13px; font-weight: 600; color: #3b82f6;">⏱️ Agent 10 档智能调度 (已激活)</label>
+                <p style="font-size: 12px; color: #64748b; margin-top: 5px; line-height: 1.5; margin-bottom: 0;">
+                   探针已脱离固定休眠配置，正式转为 <strong>线性反馈控制器</strong>。<br>
+                   基于负载综合指数 (0-100)，自动在 <b>深度休眠 (120秒)</b> 到 <b>崩溃级监控 (3秒)</b> 之间平滑无缝切换。<br>
+                   Worker 端已内置令牌桶防雪崩与 HTTP 429 过载回退机制保护数据库额度。
+                </p>
+              </div>
+
               <label style="font-size: 14px; font-weight: 600; margin-bottom: 10px; display: block; color: #e63946;">✈️ Telegram 离线告警设置</label>
               <div class="form-group">
                 <label>开启离线通知</label>
@@ -1659,7 +1683,6 @@ export default {
                 tg_notify: document.getElementById('cfg_tg_notify').value,
                 tg_bot_token: document.getElementById('cfg_tg_bot_token').value,
                 tg_chat_id: document.getElementById('cfg_tg_chat_id').value,
-                report_interval: document.getElementById('cfg_report_interval').value || '60',
                 ping_node_ct: document.getElementById('cfg_ping_node_ct').value,
                 ping_node_cu: document.getElementById('cfg_ping_node_cu').value,
                 ping_node_cm: document.getElementById('cfg_ping_node_cm').value
@@ -1797,17 +1820,12 @@ export default {
       return new Response(html, { headers: { 'Content-Type': 'text/html;charset=UTF-8' } });
     }
 
-    // ==========================================
-    // 一键安装脚本 (/install.sh)
-    // ==========================================
     if (request.method === 'GET' && url.pathname === '/install.sh') {
-      let reportInterval = '60'; 
       let pingCt = 'default'; let pingCu = 'default'; let pingCm = 'default';
       try {
-        const res = await env.DB.prepare("SELECT key, value FROM settings WHERE key IN ('report_interval', 'ping_node_ct', 'ping_node_cu', 'ping_node_cm')").all();
+        const res = await env.DB.prepare("SELECT key, value FROM settings WHERE key IN ('ping_node_ct', 'ping_node_cu', 'ping_node_cm')").all();
         if (res && res.results) {
            res.results.forEach(r => {
-              if (r.key === 'report_interval') reportInterval = r.value || '60';
               if (r.key === 'ping_node_ct') pingCt = r.value || 'default';
               if (r.key === 'ping_node_cu') pingCu = r.value || 'default';
               if (r.key === 'ping_node_cm') pingCm = r.value || 'default';
@@ -1818,18 +1836,16 @@ export default {
       const osType = url.searchParams.get('os') || 'debian';
       const sh_bin = osType === 'alpine' ? "/bin/sh" : "/bin/bash";
       const cmdApp = "curl"; const sh_sys = "systemctl";
-
       const CACHE_CONFIG_URL = `${host}/config.json`; 
 
       let bashScript = `#!${sh_bin}
 SERVER_ID=$1
 SECRET=$2
-# 🚀 极致优化：把 ID 压入请求参数，让 Worker 入口直接进行 Cache API GET 匹配，彻底免除 JSON parse 的 CPU 开销！
 WORKER_URL="${host}/update?id=\\$SERVER_ID"
 STATIC_URL="${CACHE_CONFIG_URL}"
 
 if [ -z "$SERVER_ID" ] || [ -z "$SECRET" ]; then echo "错误: 缺少参数。"; exit 1; fi
-echo "开始安装强力脱钩・秒级热重载探针 Agent..."
+echo "开始安装 10档智能平滑调度 探针 Agent..."
 
 # 清理旧环境
 `;
@@ -1843,10 +1859,10 @@ echo "开始安装强力脱钩・秒级热重载探针 Agent..."
 
 cat << EOF > /usr/local/bin/cf-probe.sh
 #!${sh_bin}
-SERVER_ID="$SERVER_ID"
-SECRET="$SECRET"
-WORKER_URL="$WORKER_URL"
-STATIC_URL="$STATIC_URL"
+SERVER_ID="\$SERVER_ID"
+SECRET="\$SECRET"
+WORKER_URL="\$WORKER_URL"
+STATIC_URL="\$STATIC_URL"
 
 get_net_bytes() { awk 'NR>2 {rx+=\\$2; tx+=\\$10} END {printf "%.0f %.0f", rx, tx}' /proc/net/dev; }
 get_cpu_stat() { awk '/^cpu / {print \\$2+\\$3+\\$4+\\$5+\\$6+\\$7+\\$8+\\$9, \\$5+\\$6}' /proc/stat; }
@@ -1860,59 +1876,35 @@ CPU_STAT=\\$(get_cpu_stat)
 PREV_CPU_TOTAL=\\$(echo \\$CPU_STAT | awk '{print \\$1}')
 PREV_CPU_IDLE=\\$(echo \\$CPU_STAT | awk '{print \\$2}')
 
-LOOP_COUNT=0
 IPV4="0"; IPV6="0"
 PING_CT="0"; PING_CU="0"; PING_CM="0"; PING_BD="0"
-
-REPORT_INTERVAL=180
 PING_NODE_CT="${pingCt}"; PING_NODE_CU="${pingCu}"; PING_NODE_CM="${pingCm}"
 
-HEARTBEAT_INTERVAL=300
-LAST_CONFIG_TIME=0
-LAST_REPORT_TIME=0
-LAST_PING_TIME=0
-PREV_CPU_VAL=0; PREV_RAM_VAL=0; PREV_DISK_VAL=0
-PREV_RX_SPEED=0; PREV_TX_SPEED=0
-PREV_V4_STATE="X"; PREV_V6_STATE="X"
+LAST_PING_CHECK=0
+LAST_LOOP_TIME=\\$(date +%s)
+LAST_INTERVAL=0
 
 while true; do
   NOW=\\$(date +%s)
-  
-  if [ \\$((NOW - LAST_CONFIG_TIME)) -ge 15 ]; then
-      RES_STATIC=\\$(${cmdApp} -s -m 3 "\\$STATIC_URL" 2>/dev/null)
-      if echo "\\$RES_STATIC" | grep -q "INTERVAL"; then
-         NEW_INV=\\$(echo "\\$RES_STATIC" | sed -n 's/.*"INTERVAL":\\([0-9]*\\).*/\\1/p')
-         if [ -n "\\$NEW_INV" ] && [ "\\$NEW_INV" -gt 0 ] 2>/dev/null; then
-             REPORT_INTERVAL=\\$NEW_INV
-         fi
-      fi
-      LAST_CONFIG_TIME=\\$NOW
-  fi
+  TIME_DELTA=\\$((NOW - LAST_LOOP_TIME))
+  [ \\$TIME_DELTA -le 0 ] && TIME_DELTA=1
+  LAST_LOOP_TIME=\\$NOW
 
-  if [ \\$((LOOP_COUNT % 12)) -eq 0 ]; then
+  if [ \\$((NOW - LAST_PING_CHECK)) -ge 120 ]; then
     ${cmdApp} -s -4 -m 3 https://cloudflare.com/cdn-cgi/trace 2>/dev/null | grep -q "ip=" && IPV4="1" || IPV4="0"
     ${cmdApp} -s -6 -m 3 https://cloudflare.com/cdn-cgi/trace 2>/dev/null | grep -q "ip=" && IPV6="1" || IPV6="0"
-  fi
-  
-  if [ \\$((LOOP_COUNT % 6)) -eq 0 ]; then
-    idx=\\$((LOOP_COUNT % 3))
-    case \\$idx in
-      0) D_CT="bj-ct-dualstack.ip.zstaticcdn.com"; D_CU="bj-cu-dualstack.ip.zstaticcdn.com"; D_CM="bj-cm-dualstack.ip.zstaticcdn.com" ;;
-      1) D_CT="sh-ct-dualstack.ip.zstaticcdn.com"; D_CU="sh-cu-dualstack.ip.zstaticcdn.com"; D_CM="sh-cm-dualstack.ip.zstaticcdn.com" ;;
-      2) D_CT="gd-ct-dualstack.ip.zstaticcdn.com"; D_CU="gd-cu-dualstack.ip.zstaticcdn.com"; D_CM="gd-cm-dualstack.ip.zstaticcdn.com" ;;
-    esac
+
     CT_NODE="\\$PING_NODE_CT"; CU_NODE="\\$PING_NODE_CU"; CM_NODE="\\$PING_NODE_CM"
-    [ "\\$CT_NODE" = "default" ] && CT_NODE="\\$D_CT"
-    [ "\\$CU_NODE" = "default" ] && CU_NODE="\\$D_CU"
-    [ "\\$CM_NODE" = "default" ] && CM_NODE="\\$D_CM"
+    [ "\\$CT_NODE" = "default" ] && CT_NODE="bj-ct-dualstack.ip.zstaticcdn.com"
+    [ "\\$CU_NODE" = "default" ] && CU_NODE="bj-cu-dualstack.ip.zstaticcdn.com"
+    [ "\\$CM_NODE" = "default" ] && CM_NODE="bj-cm-dualstack.ip.zstaticcdn.com"
 
     PING_CT=\\$(get_http_ping "\\$CT_NODE")
     PING_CU=\\$(get_http_ping "\\$CU_NODE")
     PING_CM=\\$(get_http_ping "\\$CM_NODE")
     PING_BD=\\$(get_http_ping "lf3-ips.zstaticcdn.com")
+    LAST_PING_CHECK=\\$NOW
   fi
-  
-  LOOP_COUNT=\\$((LOOP_COUNT + 1))
 
   OS=\\$(awk -F= '/^PRETTY_NAME/{print \\$2}' /etc/os-release 2>/dev/null | tr -d '"')
   [ -z "\\$OS" ] && OS=\\$(uname -srm)
@@ -1953,47 +1945,43 @@ while true; do
   RX_NOW=\\$(echo \\$NET_STAT | awk '{print \\$1}')
   TX_NOW=\\$(echo \\$NET_STAT | awk '{print \\$2}')
   
-  RX_SPEED=\\$(((RX_NOW - RX_PREV) / 3))
-  TX_SPEED=\\$(((TX_NOW - TX_PREV) / 3))
+  RX_SPEED=\\$(((RX_NOW - RX_PREV) / TIME_DELTA))
+  TX_SPEED=\\$(((TX_NOW - TX_PREV) / TIME_DELTA))
   RX_PREV=\\$RX_NOW; TX_PREV=\\$TX_NOW
 
-  NEED_REPORT=0
+  CUR_LOAD=\\$(echo "\\$LOAD" | awk '{print \\$1}')
   
-  if [ \\$((NOW - LAST_REPORT_TIME)) -ge \\$REPORT_INTERVAL ]; then NEED_REPORT=1; fi
-  
-  RX_DIFF=\\$(awk "BEGIN {d=\\$RX_SPEED-\\$PREV_RX_SPEED; d=d<0?-d:d; p=\\$PREV_RX_SPEED==0?1:d/\\$PREV_RX_SPEED; print (d>307200 && p>0.3)?1:0}")
-  TX_DIFF=\\$(awk "BEGIN {d=\\$TX_SPEED-\\$PREV_TX_SPEED; d=d<0?-d:d; p=\\$PREV_TX_SPEED==0?1:d/\\$PREV_TX_SPEED; print (d>307200 && p>0.3)?1:0}")
-  if [ "\\$RX_DIFF" -eq 1 ] || [ "\\$TX_DIFF" -eq 1 ]; then NEED_REPORT=1; fi
+  SCORE=\\$(awk -v cpu="\\$CPU" -v ram="\\$RAM" -v load="\\$CUR_LOAD" '
+  BEGIN {
+      c = cpu; r = ram; l = load * 20; 
+      if(l>100) l=100;
+      s = (c * 0.5) + (r * 0.3) + (l * 0.2);
+      if(s>100) s=100;
+      print int(s)
+  }')
 
-  CPU_DIFF=\\$(awk "BEGIN {d=\\$CPU-\\$PREV_CPU_VAL; print (d<0?-d:d > 10.0)?1:0}")
-  RAM_DIFF=\\$(awk "BEGIN {d=\\$RAM-\\$PREV_RAM_VAL; print (d<0?-d:d > 5.0)?1:0}")
-  DISK_DIFF=\\$(awk "BEGIN {d=\\$DISK-\\$PREV_DISK_VAL; print (d<0?-d:d > 1.0)?1:0}")
-  
-  if [ "\\$CPU_DIFF" -eq 1 ] || [ "\\$RAM_DIFF" -eq 1 ] || [ "\\$DISK_DIFF" -eq 1 ]; then NEED_REPORT=1; fi
-  if [ "\\$IPV4" != "\\$PREV_V4_STATE" ] || [ "\\$IPV6" != "\\$PREV_V6_STATE" ]; then NEED_REPORT=1; fi
+  LEVEL=\\$(awk -v s=\\$SCORE 'BEGIN {l=int(s/10)+1; if(l>10) l=10; print l}')
 
-  MIN_REPORT_INTERVAL=20
-  if [ \\$NEED_REPORT -eq 1 ] && [ \\$((NOW - LAST_REPORT_TIME)) -lt \\$MIN_REPORT_INTERVAL ]; then
-      NEED_REPORT=0
+  INTERVAL=\\$(awk -v s=\\$SCORE 'BEGIN {i=120-(s*1.17); if(i<3) i=3; print int(i)}')
+
+  if [ "\\$LAST_INTERVAL" -eq 0 ]; then
+      LAST_INTERVAL=\\$INTERVAL
+  else
+      DIFF=\\$((INTERVAL - LAST_INTERVAL))
+      [ \\$DIFF -lt 0 ] && DIFF=\\$((-DIFF))
+      if [ \\$DIFF -gt 5 ]; then
+          LAST_INTERVAL=\\$INTERVAL
+      fi
   fi
 
-  if [ \\$NEED_REPORT -eq 1 ]; then
-    PAYLOAD="{\\"id\\": \\"\\$SERVER_ID\\", \\"secret\\": \\"\\$SECRET\\", \\"metrics\\": { \\"cpu\\": \\"\\$CPU\\", \\"ram\\": \\"\\$RAM\\", \\"ram_total\\": \\"\\$RAM_TOTAL\\", \\"ram_used\\": \\"\\$RAM_USED\\", \\"swap_total\\": \\"\\$SWAP_TOTAL\\", \\"swap_used\\": \\"\\$SWAP_USED\\", \\"disk\\": \\"\\$DISK\\", \\"disk_total\\": \\"\\$DISK_TOTAL\\", \\"disk_used\\": \\"\\$DISK_USED\\", \\"load\\": \\"\\$LOAD\\", \\"uptime\\": \\"\\$UPTIME\\", \\"boot_time\\": \\"\\$BOOT_TIME\\", \\"net_rx\\": \\"\\$RX_NOW\\", \\"net_tx\\": \\"\\$TX_NOW\\", \\"net_in_speed\\": \\"\\$RX_SPEED\\", \\"net_out_speed\\": \\"\\$TX_SPEED\\", \\"os\\": \\"\\$OS\\", \\"arch\\": \\"\\$ARCH\\", \\"cpu_info\\": \\"\\$CPU_INFO\\", \\"processes\\": \\"\\$PROCESSES\\", \\"tcp_conn\\": \\"\\$TCP_CONN\\", \\"udp_conn\\": \\"\\$UDP_CONN\\", \\"ip_v4\\": \\"\\$IPV4\\", \\"ip_v6\\": \\"\\$IPV6\\", \\"ping_ct\\": \\"\\$PING_CT\\", \\"ping_cu\\": \\"\\$PING_CU\\", \\"ping_cm\\": \\"\\$PING_CM\\", \\"ping_bd\\": \\"\\$PING_BD\\", \\"virt\\": \\"\\$VIRT\\" }}"
-    
-    ${cmdApp} -s -X POST -H "Content-Type: application/json" -d "\\$PAYLOAD" "\\$WORKER_URL" > /dev/null 2>&1
-    
-    LAST_REPORT_TIME=\\$NOW
-    LAST_PING_TIME=\\$NOW
-    PREV_CPU_VAL=\\$CPU; PREV_RAM_VAL=\\$RAM; PREV_DISK_VAL=\\$DISK
-    PREV_RX_SPEED=\\$RX_SPEED; PREV_TX_SPEED=\\$TX_SPEED
-    PREV_V4_STATE=\\$IPV4; PREV_V6_STATE=\\$IPV6
-  elif [ \\$((NOW - LAST_PING_TIME)) -ge \\$HEARTBEAT_INTERVAL ]; then
-    PAYLOAD="{\\"id\\": \\"\\$SERVER_ID\\", \\"secret\\": \\"\\$SECRET\\", \\"type\\": \\"ping\\"}"
-    ${cmdApp} -s -X POST -H "Content-Type: application/json" -d "\\$PAYLOAD" "\\$WORKER_URL" > /dev/null 2>&1
-    LAST_PING_TIME=\\$NOW
+  PAYLOAD="{\\"id\\": \\"\\$SERVER_ID\\", \\"secret\\": \\"\\$SECRET\\", \\"level\\": \\$LEVEL, \\"suggested_interval\\": \\$LAST_INTERVAL, \\"metrics\\": { \\"cpu\\": \\"\\$CPU\\", \\"ram\\": \\"\\$RAM\\", \\"ram_total\\": \\"\\$RAM_TOTAL\\", \\"ram_used\\": \\"\\$RAM_USED\\", \\"swap_total\\": \\"\\$SWAP_TOTAL\\", \\"swap_used\\": \\"\\$SWAP_USED\\", \\"disk\\": \\"\\$DISK\\", \\"disk_total\\": \\"\\$DISK_TOTAL\\", \\"disk_used\\": \\"\\$DISK_USED\\", \\"load\\": \\"\\$LOAD\\", \\"uptime\\": \\"\\$UPTIME\\", \\"boot_time\\": \\"\\$BOOT_TIME\\", \\"net_rx\\": \\"\\$RX_NOW\\", \\"net_tx\\": \\"\\$TX_NOW\\", \\"net_in_speed\\": \\"\\$RX_SPEED\\", \\"net_out_speed\\": \\"\\$TX_SPEED\\", \\"os\\": \\"\\$OS\\", \\"arch\\": \\"\\$ARCH\\", \\"cpu_info\\": \\"\\$CPU_INFO\\", \\"processes\\": \\"\\$PROCESSES\\", \\"tcp_conn\\": \\"\\$TCP_CONN\\", \\"udp_conn\\": \\"\\$UDP_CONN\\", \\"ip_v4\\": \\"\\$IPV4\\", \\"ip_v6\\": \\"\\$IPV6\\", \\"ping_ct\\": \\"\\$PING_CT\\", \\"ping_cu\\": \\"\\$PING_CU\\", \\"ping_cm\\": \\"\\$PING_CM\\", \\"ping_bd\\": \\"\\$PING_BD\\", \\"virt\\": \\"\\$VIRT\\" }}"
+  
+  HTTP_CODE=\\$(${cmdApp} -s -o /dev/null -w "%{http_code}" -X POST -H "Content-Type: application/json" -d "\\$PAYLOAD" "\\$WORKER_URL")
+  if [ "\\$HTTP_CODE" = "429" ]; then
+      LAST_INTERVAL=60
   fi
-
-  sleep 3
+  
+  sleep \\$LAST_INTERVAL
 done
 EOF
 chmod +x /usr/local/bin/cf-probe.sh
@@ -2010,13 +1998,13 @@ EOF
 chmod +x /etc/init.d/cf-probe
 rc-update add cf-probe default
 rc-service cf-probe restart
-echo "✅ Alpine 高精脱钩版探针安装成功！"
+echo "✅ Alpine 10档智能探针安装成功！"
 `;
       } else {
         const sh_etc = "/etc/systemd/system";
         bashScript += `cat << EOF > ${sh_etc}/cf-probe.service
 [Unit]
-Description=Cloudflare Worker Probe Agent Static-Filter
+Description=Cloudflare Worker Probe Agent Smart-Schedule
 After=network.target
 [Service]
 ExecStart=/usr/local/bin/cf-probe.sh
@@ -2028,29 +2016,15 @@ EOF
 ${sh_sys} daemon-reload
 ${sh_sys} enable cf-probe.service
 ${sh_sys} restart cf-probe.service
-echo "✅ Linux 高精脱钩版探针安装成功！"
+echo "✅ Linux 10档智能探针安装成功！"
 `;
       }
       return new Response(bashScript, { headers: { 'Content-Type': 'text/plain;charset=UTF-8' } });
     }
 
-    // ==========================================
-    // API 接收数据 (/update) —— 🚀 Cache API "GET" 欺骗 & 纯内存去重 (Map 映射)
-    // ==========================================
     if (request.method === 'POST' && url.pathname === '/update') {
       try {
         let id = url.searchParams.get('id');
-        const timeWindow = Math.floor(Date.now() / 15000);
-        const cache = caches.default;
-        let cacheReq;
-
-        if (id) {
-            const cacheUrl = new URL(request.url);
-            cacheUrl.pathname = `/update-cache/${id}/${timeWindow}`;
-            cacheReq = new Request(cacheUrl.toString(), { method: 'GET' });
-            const cachedRes = await cache.match(cacheReq);
-            if (cachedRes) return cachedRes;
-        }
 
         let data;
         try {
@@ -2062,21 +2036,19 @@ echo "✅ Linux 高精脱钩版探针安装成功！"
         id = id || data.id; 
         const { secret, metrics, type } = data;
 
-        if (!cacheReq) {
-            const cacheUrl = new URL(request.url);
-            cacheUrl.pathname = `/update-cache/${id}/${timeWindow}`;
-            cacheReq = new Request(cacheUrl.toString(), { method: 'GET' });
-            const cachedRes = await cache.match(cacheReq);
-            if (cachedRes) return cachedRes;
-        }
-
         if (secret !== env.API_SECRET) return new Response('Unauthorized', { status: 401 });
+
+        if (globalThis.isFlushing && globalThis.dbUpdateMap && globalThis.dbUpdateMap.size > 80) {
+            return new Response("Backoff: System Overloaded", { 
+                status: 429, 
+                headers: {'Retry-After': '30', 'Access-Control-Allow-Origin': '*'} 
+            });
+        }
 
         let countryCode = request.cf && request.cf.country ? request.cf.country : 'XX';
         if (countryCode.toUpperCase() === 'TW') countryCode = 'CN';
 
         const processMetricsAndBuffer = async () => {
-            // 🚀 收官核心：升级缓冲池为 Map，同一机器的同一类型操作直接在内存发生「状态覆盖」
             if (!globalThis.dbUpdateMap) globalThis.dbUpdateMap = new Map();
             if (!globalThis.lastDbFlushTime) globalThis.lastDbFlushTime = Date.now();
             if (!globalThis.histCache) globalThis.histCache = {};
@@ -2164,7 +2136,15 @@ echo "✅ Linux 高精脱钩版探针安装成功！"
             }
 
             const nowMsForThrottle = Date.now();
-            if ((globalThis.dbUpdateMap.size >= 15 || (nowMsForThrottle - globalThis.lastDbFlushTime > 10000)) && !globalThis.isFlushing) {
+            
+            const reqLevel = parseInt(data.level || 1);
+            const getFlushThreshold = (mode) => {
+                const map = { 1: 50, 2: 40, 3: 30, 4: 20, 5: 15, 6: 10, 7: 8, 8: 5, 9: 3, 10: 1 };
+                return map[mode] || 20;
+            };
+            const dynamicThreshold = getFlushThreshold(reqLevel);
+
+            if ((globalThis.dbUpdateMap.size >= dynamicThreshold || (nowMsForThrottle - globalThis.lastDbFlushTime > 10000)) && !globalThis.isFlushing) {
                 globalThis.isFlushing = true;
                 try {
                     const batchToFlush = Array.from(globalThis.dbUpdateMap.values());
@@ -2207,8 +2187,16 @@ echo "✅ Linux 高精脱钩版探针安装成功！"
 
         ctx.waitUntil(processMetricsAndBuffer());
 
-        const finalOkRes = new Response("OK", { status: 200, headers: {'Cache-Control': 's-maxage=15, max-age=15'} });
-        ctx.waitUntil(cache.put(cacheReq, finalOkRes.clone()));
+        const commandInterval = data.suggested_interval || 40;
+
+        const finalOkRes = new Response("OK", { 
+            status: 200, 
+            headers: {
+                'Content-Type': 'text/plain',
+                'X-Refresh-Interval': commandInterval.toString(),
+                'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate'
+            } 
+        });
         return finalOkRes;
         
       } catch (e) { return new Response('Error', { status: 400 }); }
@@ -2220,30 +2208,46 @@ echo "✅ Linux 高精脱钩版探针安装成功！"
       if (!id) return new Response('Miss ID', { status: 400 });
       const server = await env.DB.prepare('SELECT * FROM servers WHERE id = ?').bind(id).first();
       if (!server || server.is_hidden === 'true') return new Response('Not Found', { status: 404 });
-      return new Response(JSON.stringify(server), { headers: { 'Content-Type': 'application/json' } });
+      
+      const cpu = parseFloat(server.cpu || 0);
+      const load = parseFloat(server.load_avg ? server.load_avg.split(' ')[0] : 0);
+      const isBurst = (cpu > 80 || load > 5);
+      const commandInterval = isBurst ? 5 : 40;
+
+      return new Response(JSON.stringify(server), { 
+        headers: { 
+          'Content-Type': 'application/json',
+          'X-Refresh-Interval': commandInterval.toString(),
+          'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate'
+        } 
+      });
     }
 
     // ==========================================
-    // 前台探针首页 & 详情页 —— 🚀 完全免读库的全量 HTML 内存快照缓冲
+    // 前台探针首页 & 详情页
     // ==========================================
     if (request.method === 'GET' && url.pathname === '/') {
       if (sys.is_public !== 'true' && !checkAuth(request)) return authResponse(sys.site_title);
 
-      const isAjax = url.searchParams.get('ajax') === '1';
       const viewId = url.searchParams.get('id');
       
-      const nowSec = Math.floor(Date.now() / 15000); 
-      const nowSecIndex = Math.floor(Date.now() / 30000); // 🚀 补全此处声明
+      const currentBurstMode = globalThis.isBurstMode || false;
+      const cacheDivisor = currentBurstMode ? 4000 : 15000;
+      const nowSec = Math.floor(Date.now() / cacheDivisor); 
+      const nowSecIndex = Math.floor(Date.now() / 30000); 
 
-      // 1. Ajax 异步获取数据拦截（切断无脑轮询 D1）
-      if (isAjax && globalThis.ajaxCacheSec === nowSec && globalThis.ajaxCacheData) {
-          return new Response(globalThis.ajaxCacheData, { headers: { 'Content-Type': 'text/html' } });
+      if (isAjax && globalThis.ajaxCacheSec === nowSec && globalThis.ajaxCacheData && globalThis.ajaxCacheCommand) {
+          return new Response(globalThis.ajaxCacheData, { 
+              headers: { 
+                  'Content-Type': 'text/html',
+                  'X-Refresh-Interval': globalThis.ajaxCacheCommand.toString(),
+                  'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate'
+              } 
+          });
       }
 
-      // 2. 首页静态刷新拦截（切断疯狂 F5 重刷 D1）
       if (!isAjax && !viewId && globalThis.indexCacheSec === nowSecIndex && globalThis.indexCacheData) {
           ctx.waitUntil((async () => {
-             // 利用 ctx.waitUntil 在后台异步增加访问统计，保证缓存极速命中同时不丢数据
              let vTotal = parseInt(sys.visits_total || '0') + 1;
              let vToday = parseInt(sys.visits_today || '0') + 1;
              let vDate = sys.visits_date || '';
@@ -2273,7 +2277,7 @@ echo "✅ Linux 高精脱钩版探针安装成功！"
       }
       
       let { results } = await env.DB.prepare(`
-          SELECT id, name, cpu, ram, disk, last_updated, net_in_speed, net_out_speed, 
+          SELECT id, name, cpu, ram, disk, load_avg, last_updated, net_in_speed, net_out_speed, 
                  monthly_rx, monthly_tx, net_rx, net_tx, server_group, country, price, 
                  expire_date, uptime, bandwidth, traffic_limit, ip_v4, ip_v6, 
                  ping_ct, ping_cu, ping_cm, ping_bd, cpu_info, ram_used, ram_total, 
@@ -2281,6 +2285,18 @@ echo "✅ Linux 高精脱钩版探针安装成功！"
           FROM servers WHERE is_hidden != 'true'
       `).all();
       if (!results) results = [];
+
+      let isBurst = false;
+      for (const s of results) {
+          const cpu = parseFloat(s.cpu || 0);
+          const load = parseFloat(s.load_avg ? s.load_avg.split(' ')[0] : 0);
+          if (cpu > 80 || load > 5) {
+              isBurst = true;
+              break;
+          }
+      }
+      globalThis.isBurstMode = isBurst;
+      const commandInterval = isBurst ? 5 : 40;
 
       let currentAssetUpdate = 0;
       for(const s of results) { currentAssetUpdate += (calcServerAsset(s, Date.now()).amount || 0); }
@@ -2365,6 +2381,7 @@ echo "✅ Linux 高精脱钩版探针安装成功！"
             ${getFooterHtml(sys)}
           </div>
           <script>
+            const escapeHTML = str => String(str).replace(/[&<>'"]/g, tag => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[tag] || tag));
             const serverId = "${viewId}";
             const formatBytes = (bytes) => { const b = parseInt(bytes); if (isNaN(b) || b === 0) return '0 B'; const k = 1024; const sizes = ['B', 'KB', 'MB', 'GB', 'TB']; const i = Math.floor(Math.log(b) / Math.log(k)); return parseFloat((b / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]; };
             const commonOptions = { responsive: true, maintainAspectRatio: false, animation: { duration: 0 }, scales: { x: { display: false }, y: { beginAtZero: true, border: { display: false } } }, plugins: { legend: { display: false }, tooltip: { enabled: false } }, elements: { point: { radius: 0 }, line: { tension: 0.4, borderWidth: 2 } } };
@@ -2375,35 +2392,48 @@ echo "✅ Linux 高精脱钩版探针安装成功！"
             const pingOptions = { responsive: true, maintainAspectRatio: false, animation: { duration: 0 }, scales: { x: { display: true, ticks: { maxTicksLimit: 15, color: '#9ca3af', font: { size: 10 } } }, y: { beginAtZero: true, border: { display: false } } }, plugins: { legend: { display: true, position: 'top', labels: { boxWidth: 12, font: { size: 11 } } }, tooltip: { enabled: true, mode: 'index', intersect: false } }, elements: { point: { radius: 0, hitRadius: 10, hoverRadius: 4 }, line: { tension: 0.3, borderWidth: 2 } } };
             charts.ping = new Chart(document.getElementById('chartPing').getContext('2d'), { type: 'line', data: { labels: [], datasets: [ { label: '电信', data: [], borderColor: '#10b981', backgroundColor: 'transparent' }, { label: '联通', data: [], borderColor: '#f59e0b', backgroundColor: 'transparent' }, { label: '移动', data: [], borderColor: '#3b82f6', backgroundColor: 'transparent' }, { label: '字节', data: [], borderColor: '#8b5cf6', backgroundColor: 'transparent' } ] }, options: pingOptions });
 
+            let currentInterval = 40000;
+            let timer = null;
+            
             async function fetchData() {
               try {
-                const res = await fetch('/api/server?id=' + serverId); const data = await res.json();
+                const res = await fetch('/api/server?id=' + serverId + '&t=' + Date.now()); 
+                const headerInterval = res.headers.get('X-Refresh-Interval');
+                const newInterval = (parseInt(headerInterval) * 1000) || 40000;
+
+                const data = await res.json();
                 const cCode = (data.country || 'xx').toLowerCase();
-                document.getElementById('head-flag').innerHTML = cCode !== 'xx' ? \`<img src="https://flagcdn.com/24x18/\${cCode}.png" alt="\${cCode}" style="vertical-align: middle; margin-right: 8px; border-radius: 2px;">\` : '🏳️ ';
+                document.getElementById('head-flag').innerHTML = cCode !== 'xx' ? \`<img src="https://flagcdn.com/24x18/\${escapeHTML(cCode)}.png" alt="\${escapeHTML(cCode)}" style="vertical-align: middle; margin-right: 8px; border-radius: 2px;">\` : '🏳️ ';
                 document.getElementById('val-uptime').innerText = data.uptime || 'N/A'; document.getElementById('val-arch').innerText = data.arch || 'N/A'; document.getElementById('val-os').innerText = data.os || 'N/A'; document.getElementById('val-virt').innerText = data.virt || 'N/A'; document.getElementById('val-cpuinfo').innerText = data.cpu_info || 'N/A'; document.getElementById('val-load').innerText = data.load_avg || '0.00'; document.getElementById('val-boot').innerText = data.boot_time || 'N/A'; 
                 document.getElementById('val-traffic').innerText = formatBytes(data.${txField} || 0) + ' / ' + formatBytes(data.${rxField} || 0);
 
                 const isOnline = (Date.now() - data.last_updated) < ${OFFLINE_THRESHOLD};
                 const badge = document.getElementById('head-status'); badge.innerText = isOnline ? '在线' : '离线'; badge.style.background = isOnline ? '#10b981' : '#ef4444';
-                if(!isOnline) return;
                 
-                document.getElementById('text-cpu').innerText = data.cpu + '%'; document.getElementById('text-ram').innerText = data.ram + '%'; document.getElementById('text-swap').innerText = 'Swap: ' + data.swap_used + ' MiB / ' + data.swap_total + ' MiB'; document.getElementById('text-proc').innerText = data.processes || '0'; document.getElementById('text-net-in').innerText = formatBytes(data.net_in_speed) + '/s'; document.getElementById('text-net-out').innerText = formatBytes(data.net_out_speed) + '/s'; document.getElementById('text-tcp').innerText = data.tcp_conn || '0'; document.getElementById('text-udp').innerText = data.udp_conn || '0';
-                let diskTotal = parseFloat(data.disk_total) || 0; let diskUsed = parseFloat(data.disk_used) || 0; let diskPct = parseInt(data.disk) || 0;
-                document.getElementById('text-disk').innerText = diskPct + '%'; document.getElementById('disk-bar').style.width = diskPct + '%'; document.getElementById('text-disk-detail').innerText = (diskUsed/1024).toFixed(2) + ' GiB / ' + (diskTotal/1024).toFixed(2) + ' GiB';
-                document.getElementById('t-ct').innerText = data.ping_ct + 'ms'; document.getElementById('t-cu').innerText = data.ping_cu + 'ms'; document.getElementById('t-cm').innerText = data.ping_cm + 'ms'; document.getElementById('t-bd').innerText = data.ping_bd + 'ms';
+                if (newInterval !== currentInterval) {
+                    currentInterval = newInterval;
+                }
+                
+                if(isOnline) {
+                  document.getElementById('text-cpu').innerText = data.cpu + '%'; document.getElementById('text-ram').innerText = data.ram + '%'; document.getElementById('text-swap').innerText = 'Swap: ' + data.swap_used + ' MiB / ' + data.swap_total + ' MiB'; document.getElementById('text-proc').innerText = data.processes || '0'; document.getElementById('text-net-in').innerText = formatBytes(data.net_in_speed) + '/s'; document.getElementById('text-net-out').innerText = formatBytes(data.net_out_speed) + '/s'; document.getElementById('text-tcp').innerText = data.tcp_conn || '0'; document.getElementById('text-udp').innerText = data.udp_conn || '0';
+                  let diskTotal = parseFloat(data.disk_total) || 0; let diskUsed = parseFloat(data.disk_used) || 0; let diskPct = parseInt(data.disk) || 0;
+                  document.getElementById('text-disk').innerText = diskPct + '%'; document.getElementById('disk-bar').style.width = diskPct + '%'; document.getElementById('text-disk-detail').innerText = (diskUsed/1024).toFixed(2) + ' GiB / ' + (diskTotal/1024).toFixed(2) + ' GiB';
+                  document.getElementById('t-ct').innerText = data.ping_ct + 'ms'; document.getElementById('t-cu').innerText = data.ping_cu + 'ms'; document.getElementById('t-cm').innerText = data.ping_cm + 'ms'; document.getElementById('t-bd').innerText = data.ping_bd + 'ms';
 
-                let hist = {}; try { if(data.history) hist = JSON.parse(data.history); } catch(e) {}
-                if (hist.time && hist.time.length > 0) {
-                    const nowTime = new Date(); const timeLabel = nowTime.getHours().toString().padStart(2, '0') + ':' + String(nowTime.getMinutes()).padStart(2, '0');
-                    const rtLabels = [...hist.time, timeLabel];
-                    const updateChartSync = (chart, histArray, rtValue) => { chart.data.labels = rtLabels; chart.data.datasets[0].data = histArray ? [...histArray, rtValue] : []; chart.update('none'); };
-                    const updateMultiChartSync = (chart, histArrays, rtValues) => { chart.data.labels = rtLabels; histArrays.forEach((hArr, i) => { chart.data.datasets[i].data = hArr ? [...hArr, rtValues[i]] : []; }); chart.update('none'); };
-                    updateChartSync(charts.cpu, hist.cpu, parseFloat(data.cpu) || 0); updateChartSync(charts.ram, hist.ram, parseFloat(data.ram) || 0); updateChartSync(charts.proc, hist.proc, parseInt(data.processes) || 0);
-                    updateMultiChartSync(charts.net, [hist.net_in, hist.net_out], [parseFloat(data.net_in_speed) || 0, parseFloat(data.net_out_speed) || 0]); updateMultiChartSync(charts.conn, [hist.tcp, hist.udp], [parseInt(data.tcp_conn) || 0, parseInt(data.udp_conn) || 0]); updateMultiChartSync(charts.ping, [hist.ping_ct, hist.ping_cu, hist.ping_cm, hist.ping_bd], [parseInt(data.ping_ct) || 0, parseInt(data.ping_cu) || 0, parseInt(data.ping_cm) || 0, parseInt(data.ping_bd) || 0]);
+                  let hist = {}; try { if(data.history) hist = JSON.parse(data.history); } catch(e) {}
+                  if (hist.time && hist.time.length > 0) {
+                      const nowTime = new Date(); const timeLabel = nowTime.getHours().toString().padStart(2, '0') + ':' + String(nowTime.getMinutes()).padStart(2, '0');
+                      const rtLabels = [...hist.time, timeLabel];
+                      const updateChartSync = (chart, histArray, rtValue) => { chart.data.labels = rtLabels; chart.data.datasets[0].data = histArray ? [...histArray, rtValue] : []; chart.update('none'); };
+                      const updateMultiChartSync = (chart, histArrays, rtValues) => { chart.data.labels = rtLabels; histArrays.forEach((hArr, i) => { chart.data.datasets[i].data = hArr ? [...hArr, rtValues[i]] : []; }); chart.update('none'); };
+                      updateChartSync(charts.cpu, hist.cpu, parseFloat(data.cpu) || 0); updateChartSync(charts.ram, hist.ram, parseFloat(data.ram) || 0); updateChartSync(charts.proc, hist.proc, parseInt(data.processes) || 0);
+                      updateMultiChartSync(charts.net, [hist.net_in, hist.net_out], [parseFloat(data.net_in_speed) || 0, parseFloat(data.net_out_speed) || 0]); updateMultiChartSync(charts.conn, [hist.tcp, hist.udp], [parseInt(data.tcp_conn) || 0, parseInt(data.udp_conn) || 0]); updateMultiChartSync(charts.ping, [hist.ping_ct, hist.ping_cu, hist.ping_cm, hist.ping_bd], [parseInt(data.ping_ct) || 0, parseInt(data.ping_cu) || 0, parseInt(data.ping_cm) || 0, parseInt(data.ping_bd) || 0]);
+                  }
                 }
               } catch (e) {}
+              timer = setTimeout(fetchData, currentInterval);
             }
-            setInterval(fetchData, 30000); fetchData();
+            fetchData();
           </script>
           ${sys.custom_script || ''}
         </body>
@@ -2478,7 +2508,8 @@ echo "✅ Linux 高精脱钩版探针安装成功！"
               
               let dWallet = p.wallet_address;
               let dCycle = dWallet && walletBalances[dWallet] ? walletBalances[dWallet].toFixed(2) : '0.00';
-              let cycleHtml = dWallet ? `<a href="javascript:void(0)" onclick="searchBalance('${dWallet}'); document.getElementById('rankModal').style.display='none'; switchView('block');" style="color:#8b5cf6;text-decoration:none;">${dCycle}</a>` : `<span style="color:#9ca3af;">0.00</span>`;
+              let escapeAddr = dWallet ? dWallet.replace(/[&<>'"]/g, tag => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[tag] || tag)) : '';
+              let cycleHtml = dWallet ? `<a href="javascript:void(0)" onclick="searchBalance('${escapeAddr}'); document.getElementById('rankModal').style.display='none'; switchView('block');" style="color:#8b5cf6;text-decoration:none;">${dCycle}</a>` : `<span style="color:#9ca3af;">0.00</span>`;
 
               rankTableHtml += `<tr style="${rowStyle}"><td>${idx + 1}</td><td style="max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${p.domain}">${p.domain}</td><td>${vpsCount}</td><td style="color:#10b981;font-weight:bold;">${pAsset.toFixed(2)}</td><td style="font-weight:bold;">${cycleHtml}</td><td>${ls}</td></tr>`;
               
@@ -2610,7 +2641,8 @@ echo "✅ Linux 高精脱钩版探针安装成功！"
           const { results: rList } = await env.DB.prepare('SELECT address, balance FROM blockchain_wallets ORDER BY balance DESC LIMIT 10').all();
           rList.forEach((r, idx) => {
               const shortAddr = r.address.length > 15 ? r.address.substring(0,8) + '...' + r.address.slice(-6) : r.address;
-              richListRows += `<tr><td>#${idx+1} <a href="javascript:void(0)" onclick="searchBalance('${r.address}')" style="color:#3b82f6; text-decoration:none; font-family:monospace;">${shortAddr}</a></td><td style="text-align:right; font-weight:bold; color:#10b981;">${r.balance.toFixed(2)} Cycle</td></tr>`;
+              let escapeAddr = r.address.replace(/[&<>'"]/g, tag => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[tag] || tag));
+              richListRows += `<tr><td>#${idx+1} <a href="javascript:void(0)" onclick="searchBalance('${escapeAddr}')" style="color:#3b82f6; text-decoration:none; font-family:monospace;">${shortAddr}</a></td><td style="text-align:right; font-weight:bold; color:#10b981;">${r.balance.toFixed(2)} Cycle</td></tr>`;
           });
       } catch(e) {}
 
@@ -2651,7 +2683,15 @@ echo "✅ Linux 高精脱钩版探针安装成功！"
           
           globalThis.ajaxCacheSec = nowSec;
           globalThis.ajaxCacheData = ajaxResponse;
-          return new Response(ajaxResponse, { headers: { 'Content-Type': 'text/html' } });
+          globalThis.ajaxCacheCommand = commandInterval;
+
+          return new Response(ajaxResponse, { 
+            headers: { 
+              'Content-Type': 'text/html',
+              'X-Refresh-Interval': commandInterval.toString(),
+              'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate'
+            } 
+          });
       }
 
       const html = `<!DOCTYPE html>
@@ -2757,6 +2797,7 @@ echo "✅ Linux 高精脱钩版探针安装成功！"
 
         <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
         <script>
+          const escapeHTML = str => String(str).replace(/[&<>'"]/g, tag => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[tag] || tag));
           let mapInitialized = false; window.currentFilter = 'all';
           const EPOCH_START = ${EPOCH_START}; const SLOT_TIME = ${SLOT_TIME};
           setInterval(() => {
@@ -2785,13 +2826,13 @@ echo "✅ Linux 高精脱钩版探针安装成功！"
               const addr = document.getElementById('radar-input').value.trim(); if(!addr) return;
               const resDiv = document.getElementById('ui-balance-result'); resDiv.style.display = 'block';
               try {
-                  const res = await fetch('/?action=balance&address=' + addr + '&t=' + Date.now()); const data = await res.json();
-                  resDiv.innerHTML = \`账户地址 <b>\${addr}</b> 持有资产：<b style="color:#10b981;">\${data.balance.toFixed(2)} Cycle</b>\`;
+                  const res = await fetch('/?action=balance&address=' + encodeURIComponent(addr) + '&t=' + Date.now()); const data = await res.json();
+                  resDiv.innerHTML = \`账户地址 <b>\${escapeHTML(addr)}</b> 持有资产：<b style="color:#10b981;">\${data.balance.toFixed(2)} Cycle</b>\`;
               } catch(e) { resDiv.innerHTML = \`查询失败\`; }
           }
           function showBlockTxs(txsStr) {
               const txs = JSON.parse(txsStr); let html = '<ul>';
-              txs.forEach(tx => { html += tx.type === 'COINBASE' ? \`<li>⛏️ 挖矿奖励 &rarr; \${tx.to} [+ \${tx.amount} Cycle]</li>\` : \`<li>💸 转账: \${tx.from} &rarr; \${tx.to} [\${tx.amount} Cycle]</li>\`; });
+              txs.forEach(tx => { html += tx.type === 'COINBASE' ? \`<li>⛏️ 挖矿奖励 &rarr; \${escapeHTML(tx.to)} [+ \${tx.amount} Cycle]</li>\` : \`<li>💸 转账: \${escapeHTML(tx.from)} &rarr; \${escapeHTML(tx.to)} [\${tx.amount} Cycle]</li>\`; });
               document.getElementById('txTraceList').innerHTML = html + '</ul>'; document.getElementById('txTraceModal').style.display = 'block';
           }
           let markersLayer; let geoJsonLayer; let worldGeoJson = null; let currentMapDataStr = "";
@@ -2808,9 +2849,17 @@ echo "✅ Linux 高精脱钩版探针安装成功！"
             for (const [code, count] of Object.entries(data)) { if(countryCoords[code]) { L.marker(countryCoords[code], {icon: L.divIcon({ className: 'custom-map-badge', html: \`<div>\${count}</div>\` })}).addTo(markersLayer); } }
           }
 
-          setInterval(async () => {
+          let currentInterval = 40000;
+          let timer = null;
+
+          async function autoRefresh() {
             try {
-              const res = await fetch(location.href + (location.href.includes('?') ? '&' : '?') + 'ajax=1'); const htmlText = await res.text();
+              const res = await fetch(location.href + (location.href.includes('?') ? '&' : '?') + 'ajax=1&t=' + Date.now()); 
+              
+              const headerInterval = res.headers.get('X-Refresh-Interval');
+              const newInterval = (parseInt(headerInterval) * 1000) || 40000;
+
+              const htmlText = await res.text();
               const parser = new DOMParser(); const newDoc = parser.parseFromString(htmlText, 'text/html');
               const payloadData = newDoc.getElementById('ajax-stats-payload');
               if (payloadData) {
@@ -2821,8 +2870,15 @@ echo "✅ Linux 高精脱钩版探针安装成功！"
                   if (newEl && document.getElementById(id)) { if (id === 'map-data') document.getElementById(id).textContent = newEl.textContent; else document.getElementById(id).innerHTML = newEl.innerHTML; }
               });
               drawMarkers(); applyFilter(); 
+
+              if (newInterval !== currentInterval) {
+                  currentInterval = newInterval;
+              }
             } catch (e) {}
-          }, 30000); 
+            
+            timer = setTimeout(autoRefresh, currentInterval);
+          }
+          timer = setTimeout(autoRefresh, currentInterval); 
         </script>
         ${sys.custom_script || ''}
       </body>
