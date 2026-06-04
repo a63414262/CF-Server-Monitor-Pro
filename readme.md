@@ -122,89 +122,83 @@ curl -sL [https://你的域名.workers.dev/install.sh](https://你的域名.work
 
 将以下代码填入后台的 **「自定义 CSS 代码」** 输入框中，即可实现超清动漫壁纸与全站半透明毛玻璃卡片效果：
 ```css
-/* 1. 网页全局二次元背景图 */
+/* 1. 网页全局背景 */
 body.theme6 {
   background: url('https://i.33xp.cn/__imgapi.cn__/__imgapi.cn__5d19cf2105e31.jpg') no-repeat center center fixed !important;
   background-size: cover !important;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
 }
 
-/* 2. 背景暗色蒙版，提高可读性 */
-body.theme6::before {
-    content: "";
-    position: fixed;
-    top: 0; left: 0; width: 100%; height: 100%;
-    background: rgba(0, 0, 0, 0.2); 
-    z-index: -1;
+/* 2. Canvas 樱花/特效层级提到最高且开启点击穿透 */
+#effect_canvas {
+    z-index: 99999999 !important;
+    pointer-events: none !important;
 }
 
-/* 3. 卡片毛玻璃半透明效果 (包含详情页) */
+/* 3. 材质重构：改用暗黑系全透明光幕（彻底解决吃字、看不清的问题） */
+.theme6 .consensus-panel,
 .theme6 .vps-card, 
 .theme6 .global-stats, 
 .theme6 .custom-table, 
-.theme6 .header,
-.theme6 .view-controls,
 .theme6 .header-card,
-.theme6 .chart-card {
-  background-color: rgba(255, 255, 255, 0.65) !important; 
-  backdrop-filter: blur(10px) !important;
-  -webkit-backdrop-filter: blur(10px) !important;
-  border-radius: 16px !important;
-  border: 1px solid rgba(255, 255, 255, 0.5) !important;
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1) !important;
-  transition: all 0.3s ease;
+.theme6 .custom-table th,
+.theme6 .chart-card,
+.theme6 .modal-content {
+  background: rgba(15, 23, 42, 0.45) !important; /* 优雅的45%半透明深色黑夜底板，压住复杂的背景干扰 */
+  backdrop-filter: none !important; /* 保持100%全透明不浑浊 */
+  -webkit-backdrop-filter: none !important;
+  border: 1px solid rgba(255, 255, 255, 0.15) !important; /* 极细的半透明白描边，勾勒出外框 */
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2) !important; 
+  border-radius: 12px !important;
 }
 
-/* 4. 悬停反馈 (更具科技感的发光边框) */
-.theme6 .vps-card:hover,
-.theme6 .chart-card:hover {
-  background-color: rgba(255, 255, 255, 0.85) !important;
-  box-shadow: 0 0 20px rgba(33, 186, 69, 0.2) !important;
-  border-color: rgba(33, 186, 69, 0.4) !important;
+/* 4. 荧光控光文字：在暗色背景下，亮色字体清晰度直接暴增 */
+.theme6 .c-label,
+.theme6 .g-label,
+.theme6 .stat-label,
+.theme6 .card-meta {
+  color: #94a3b8 !important; /* 优雅的浅板岩灰，用于次要标签 */
+  font-weight: 500 !important;
+  text-shadow: none !important;
 }
 
-/* 5. 进度条统一改为 Nezha 绿色 */
-.theme6 .stat-bar > div,
-.theme6 #disk-bar {
-  background-color: #21ba45 !important;
+.theme6 .c-val,
+.theme6 .g-val,
+.theme6 .stat-val,
+.theme6 .card-title-text,
+.theme6 .card-title,
+.theme6 td {
+  color: #f8fafc !important; /* 纯净的月光白，无论背景多复杂都能一眼识别 */
+  font-weight: 600 !important;
+  text-shadow: none !important; 
 }
 
-/* 6. 文字颜色与字体适配 */
-.theme6 .stat-label, 
-.theme6 .g-label, 
-.theme6 .card-meta, 
-.theme6 .info-label { 
-  color: #555 !important; 
+/* 主标题微调（防止顶部标题看不清） */
+.theme6 h1 {
+  color: #ffffff !important;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5) !important;
 }
 
-.theme6 .stat-val, 
-.theme6 .g-val, 
-.theme6 .card-title-text, 
-.theme6 .info-value, 
-.theme6 .chart-card h3,
-.theme6 .speed-val { 
-  color: #000 !important; 
-  font-family: 'Consolas', 'Monaco', monospace !important;
+/* 5. 进度条背景优化，在暗色下面更加醒目 */
+.theme6 .stat-bar-full {
+  background: rgba(255, 255, 255, 0.1) !important;
+  border: 1px solid rgba(255, 255, 255, 0.05) !important;
 }
 
-.theme6 .group-header { 
-  color: #fff !important; 
-  text-shadow: 0 2px 4px rgba(0,0,0,0.8); 
+/* 6. 组件及特殊高亮标签微调 */
+.theme6 .badge-bw { background: rgba(59, 130, 246, 0.8) !important; color: #fff !important; }
+.theme6 .badge-tf { background: rgba(16, 185, 129, 0.8) !important; color: #fff !important; }
+.theme6 span[style*="color:#8b5cf6"], 
+.theme6 span[style*="color: rgb(139, 92, 246)"] {
+  color: #c084fc !important; /* 改为淡紫色荧光 */
+  font-weight: 700 !important;
 }
 
-/* 7. 优化滚动条样式 */
-.theme6 ::-webkit-scrollbar { width: 6px; height: 6px; }
-.theme6 ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.2); border-radius: 3px; }
-.theme6 ::-webkit-scrollbar-thumb:hover { background: rgba(33, 186, 69, 0.5); }
+/* 7. 确保点击事件可以传导给 body */
+.container {
+    position: relative;
+    z-index: 10;
+}
 
-/* 8. 图表入场动画 */
-.theme6 .chart-card {
-    animation: fadeInUp 0.6s ease-out;
-}
-@keyframes fadeInUp {
-    from { opacity: 0; transform: translateY(10px); }
-    to { opacity: 1; transform: translateY(0); }
-}
 ```
 
 ### ✨ 炫酷动态特效注入 (0 依赖纯原生)
