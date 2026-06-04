@@ -206,7 +206,7 @@ export default {
       is_public: 'true', show_price: 'true', show_expire: 'true', show_bw: 'true', show_tf: 'true',
       show_asset: 'false', asset_currency: '元', is_beacon: 'true', enable_ranking: 'false', ranking_api: '',
       tg_notify: 'false', tg_bot_token: '', tg_chat_id: '',
-      auto_reset_traffic: 'false', report_interval: '60', // 默认提升至 60 秒
+      auto_reset_traffic: 'false', report_interval: '60',
       ping_node_ct: 'default', ping_node_cu: 'default', ping_node_cm: 'default',
       miner_wallet: '', ping_nodes_list: ''
     };
@@ -326,6 +326,7 @@ export default {
       return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
     };
 
+    // 🚀 核心优化 2：计算与存储分离。独立出资产查询到内存，供后续共识打包时极速读取。
     const calcServerAsset = (server, nowMs) => {
         let amount = 0; let remValue = 0;
         try {
@@ -371,6 +372,22 @@ export default {
         
         return { amount: amount || 0, remValue: remValue || 0 };
     };
+
+    // 🚀 核心优化 2.1：利用后台任务定期更新全量缓存资产，避免阻塞主线程
+    const refreshGlobalAssetCache = async () => {
+        const now = Date.now();
+        if (!globalThis.lastAssetCacheTime || now - globalThis.lastAssetCacheTime > 60000) {
+            globalThis.lastAssetCacheTime = now;
+            try {
+                const { results: allS } = await env.DB.prepare('SELECT price, expire_date FROM servers WHERE is_hidden="false"').all();
+                let localAsset = 0;
+                for(const s of allS) { localAsset += (calcServerAsset(s, now).amount || 0); }
+                globalThis.cachedTotalAsset = Math.min(localAsset, 100000000);
+                globalThis.cachedVpsCount = allS.length;
+            } catch(e) {}
+        }
+    };
+    ctx.waitUntil(refreshGlobalAssetCache());
 
     const getBootstrapPeers = async () => {
         const { results } = await env.DB.prepare(`SELECT domain FROM blockchain_peers WHERE is_beacon IN ('true', '1') ORDER BY last_seen DESC LIMIT 50`).all();
@@ -787,7 +804,8 @@ export default {
                 let allStmts = [];
                 allStmts.push(env.DB.prepare(`INSERT OR IGNORE INTO blockchain_ledger (slot_id, proposer_domain, block_hash, parent_hash, payload, timestamp, total_difficulty, status) VALUES (?, ?, ?, ?, ?, ?, ?, 1)`).bind(block.slot_id, block.proposer_domain, block.block_hash, block.parent_hash, block.payload, block.timestamp || getNetworkTime(), blockDifficulty));
                 
-                allStmts.push(env.DB.prepare(`
+                // 🚀 异步化 Peer 更新，剥离不必要的强一致性锁
+                ctx.waitUntil(env.DB.prepare(`
                     INSERT INTO blockchain_peers (domain, is_beacon, vps_count, total_asset, last_seen, wallet_address) 
                     VALUES (?, 'true', ?, ?, ?, ?) 
                     ON CONFLICT(domain) DO UPDATE SET 
@@ -796,7 +814,7 @@ export default {
                         total_asset=excluded.total_asset, 
                         last_seen=MAX(last_seen, excluded.last_seen),
                         wallet_address=CASE WHEN excluded.wallet_address != '' THEN excluded.wallet_address ELSE wallet_address END
-                `).bind(block.proposer_domain, parseInt(pl.vps_count)||0, safeTotalAsset, Date.now(), proposerWallet));
+                `).bind(block.proposer_domain, parseInt(pl.vps_count)||0, safeTotalAsset, Date.now(), proposerWallet).run().catch(()=>{}));
                 
                 if (pl.txs && pl.txs.length > 0) allStmts.push(...getTxsStateStmts(pl.txs, evalResult.stateDiff));
 
@@ -820,7 +838,6 @@ export default {
                         const tip = await env.DB.prepare('SELECT block_hash FROM blockchain_ledger WHERE status = 1 ORDER BY slot_id DESC LIMIT 1').first();
                         if (tip && tip.block_hash === block.block_hash) {
                             const blockData = { slot_id: block.slot_id, proposer_domain: host, block_hash: block.block_hash, parent_hash: block.parent_hash, payload: block.payload, timestamp: block.timestamp, total_difficulty: blockDifficulty, signature: block.signature };
-                            // 🚀 核心优化 2：Gossip 协议重构，从 LIMIT 500 改为 LIMIT 8，彻底规避 Workers 子请求数量上限导致的 CPU 爆表
                             const { results: beacons } = await env.DB.prepare(`SELECT domain FROM blockchain_peers WHERE is_beacon IN ('true', '1') AND domain != ? ORDER BY RANDOM() LIMIT 8`).bind(host).all();
                             for (const b of beacons) {
                                 fetchWithTimeSync(`${b.domain}/api/consensus/submit`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(blockData) }, b.domain).catch(() => {});
@@ -862,12 +879,9 @@ export default {
                 return;
             }
 
-            // 🚀 核心优化 3：将全局服务器信息的读取移到真正确认可以出块之后，避免被频繁的心跳浪费 D1 查询额度
-            const { results: allS } = await env.DB.prepare('SELECT price, expire_date FROM servers WHERE is_hidden="false"').all();
-            let localAsset = 0;
-            for(const s of allS) { localAsset += (calcServerAsset(s, currentNetTime).amount || 0); }
-            localAsset = Math.min(localAsset, 100000000);
-            let localVpsCount = allS.length;
+            // 🚀 核心优化 3：剔除每次出块时的全表遍历查询，直接复用前置缓存好的内存参数
+            let localAsset = globalThis.cachedTotalAsset || 0;
+            let localVpsCount = globalThis.cachedVpsCount || 0;
 
             const leaders = await getValidLeadersForSlot(currentSlot);
             const slotStart = EPOCH_START + currentSlot * SLOT_TIME;
@@ -911,11 +925,12 @@ export default {
                 return;
             }
 
-            await env.DB.prepare(`
+            // 🚀 核心优化 4：异步写入 Peer 自己上报的重力，避免锁死当前出块流水线
+            ctx.waitUntil(env.DB.prepare(`
                 INSERT INTO blockchain_peers (domain, is_beacon, vps_count, total_asset, last_seen, reputation_score, wallet_address)
                 VALUES (?, ?, ?, ?, ?, 9999, ?)
                 ON CONFLICT(domain) DO UPDATE SET is_beacon=excluded.is_beacon, vps_count=excluded.vps_count, total_asset=excluded.total_asset, last_seen=MAX(last_seen, excluded.last_seen), wallet_address=CASE WHEN excluded.wallet_address != '' THEN excluded.wallet_address ELSE wallet_address END
-            `).bind(host, sys.is_beacon === 'true' ? 'true' : 'false', localVpsCount, Math.max(0, localAsset), Date.now(), sys.miner_wallet || '').run().catch(()=>{});
+            `).bind(host, sys.is_beacon === 'true' ? 'true' : 'false', localVpsCount, Math.max(0, localAsset), Date.now(), sys.miner_wallet || '').run().catch(()=>{}));
 
             if (Math.random() < 0.2) await updateNetworkTimeOffset();
 
@@ -1782,7 +1797,7 @@ export default {
     // 一键安装脚本 (/install.sh)
     // ==========================================
     if (request.method === 'GET' && url.pathname === '/install.sh') {
-      let reportInterval = '60'; // 🚀 核心优化 4：新安装探针默认 60 秒上报
+      let reportInterval = '60'; 
       let pingCt = 'default'; let pingCu = 'default'; let pingCm = 'default';
       try {
         const res = await env.DB.prepare("SELECT key, value FROM settings WHERE key IN ('report_interval', 'ping_node_ct', 'ping_node_cu', 'ping_node_cm')").all();
@@ -1952,7 +1967,6 @@ while true; do
   if [ "\\$CPU_DIFF" -eq 1 ] || [ "\\$RAM_DIFF" -eq 1 ] || [ "\\$DISK_DIFF" -eq 1 ]; then NEED_REPORT=1; fi
   if [ "\\$IPV4" != "\\$PREV_V4_STATE" ] || [ "\\$IPV6" != "\\$PREV_V6_STATE" ]; then NEED_REPORT=1; fi
 
-  # 🚀 核心优化 5：彻底阻断“轻微波动”导致的连发狂刷！强制节流防抖
   MIN_REPORT_INTERVAL=20
   if [ \\$NEED_REPORT -eq 1 ] && [ \\$((NOW - LAST_REPORT_TIME)) -lt \\$MIN_REPORT_INTERVAL ]; then
       NEED_REPORT=0
@@ -2020,13 +2034,37 @@ echo "✅ Linux 高精脱钩版探针安装成功！"
     // ==========================================
     if (request.method === 'POST' && url.pathname === '/update') {
       try {
-        const data = await request.json();
+        // 🚀 核心优化 5：黑科技！通过 Cache API 将 POST 拦截成 GET 边缘防抖
+        // 当多台 VPS 或由于网络抖动引发并发 POST 上报时，将其伪装成带时间窗的 GET 请求丢给 Cloudflare Edge 缓存
+        const clonedReq = request.clone();
+        let data;
+        try {
+            data = await clonedReq.json();
+        } catch(e) {
+            return new Response('Invalid JSON', { status: 400 });
+        }
+        
         const { id, secret, metrics, type } = data;
         if (secret !== env.API_SECRET) return new Response('Unauthorized', { status: 401 });
 
+        // 设置防抖时间窗（例如：15 秒为一个桶，避免同一 ID 15秒内重复写 D1）
+        const timeWindow = Math.floor(Date.now() / 15000);
+        const cacheUrl = new URL(request.url);
+        cacheUrl.pathname = `/update-cache/${id}/${timeWindow}`;
+        const cacheReq = new Request(cacheUrl.toString(), { method: 'GET' });
+        const cache = caches.default;
+
+        let cachedRes = await cache.match(cacheReq);
+        if (cachedRes) {
+            // 命中边缘/内存缓存！直接阻断，不消耗后续任何 D1 额度
+            return cachedRes;
+        }
+
         if (type === 'ping') {
             await env.DB.prepare(`UPDATE servers SET last_updated = ? WHERE id = ?`).bind(Date.now(), id).run();
-            return new Response("Ping OK", { status: 200 });
+            const okRes = new Response("Ping OK", { status: 200, headers: {'Cache-Control': 's-maxage=15, max-age=15'} });
+            ctx.waitUntil(cache.put(cacheReq, okRes.clone()));
+            return okRes;
         }
 
         let countryCode = request.cf && request.cf.country ? request.cf.country : 'XX';
@@ -2128,13 +2166,14 @@ echo "✅ Linux 高精脱钩版探针安装成功！"
             ctx.waitUntil(checkOfflineNodes());
         }
         
-        // 🚀 核心优化 6：将挖矿判定节流拉长到 15秒（完美匹配 Slot 时间，大幅减少无意义校验）
         if (!globalThis.lastMineAndGossipTime || nowMsForThrottle - globalThis.lastMineAndGossipTime > 15000) {
             globalThis.lastMineAndGossipTime = nowMsForThrottle;
             ctx.waitUntil(mineAndGossip());
         }
 
-        return new Response("OK", { status: 200 });
+        const finalOkRes = new Response("OK", { status: 200, headers: {'Cache-Control': 's-maxage=15, max-age=15'} });
+        ctx.waitUntil(cache.put(cacheReq, finalOkRes.clone()));
+        return finalOkRes;
       } catch (e) { return new Response('Error', { status: 400 }); }
     }
 
@@ -2156,7 +2195,6 @@ echo "✅ Linux 高精脱钩版探针安装成功！"
       const isAjax = url.searchParams.get('ajax') === '1';
       const viewId = url.searchParams.get('id');
       
-      // 🚀 核心优化 7：大幅强化前端 Cache，将刷新消耗拦在边缘节点外
       const nowSec = Math.floor(Date.now() / 15000); 
       if (isAjax && globalThis.ajaxCacheSec === nowSec && globalThis.ajaxCacheData) {
           return new Response(globalThis.ajaxCacheData, { headers: { 'Content-Type': 'text/html' } });
