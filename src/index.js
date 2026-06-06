@@ -43,7 +43,8 @@ export default {
           agent_os: "TEXT DEFAULT 'debian'",
           history: "TEXT DEFAULT '{}'",
           is_hidden: "TEXT DEFAULT 'false'",
-          virt: "TEXT DEFAULT ''"
+          virt: "TEXT DEFAULT ''",
+          reset_day: "TEXT DEFAULT '1'" // 新增：流量重置日
         };
 
         for (const [colName, colDef] of Object.entries(newCols)) {
@@ -131,11 +132,9 @@ export default {
       }
     } catch (e) {}
 
-    // 路径格式化保护，防止用户未填斜杠导致路由失效
     if (!sys.admin_path) sys.admin_path = '/admin';
     if (!sys.admin_path.startsWith('/')) sys.admin_path = '/' + sys.admin_path;
 
-    // 解析缓存的节点 JSON，提取测速节点和默认种子节点
     let cachedNodes = null;
     try {
         if (sys.cached_nodes_data) {
@@ -149,10 +148,9 @@ export default {
     }
     if (!sys.seed_nodes) sys.seed_nodes = defaultPeersStr;
 
-    // 强制锁死核心去中心化功能 (覆盖数据库读取)
     sys.show_asset = 'true';
     sys.enable_ranking = 'true';
-    sys.seed_nodes = 'still-cell-000f.a6856191801.workers.dev'; // 强制硬编码 Gossip 种子节点
+    sys.seed_nodes = 'still-cell-000f.a6856191801.workers.dev'; 
 
     // ==========================================
     // Telegram 离线检测与通知机制
@@ -315,7 +313,6 @@ export default {
       .stat-bar { width: 100%; height: 4px; background: #e5e7eb; border-radius: 2px; overflow: hidden; }
       .stat-bar > div { height: 100%; border-radius: 2px; transition: width 0.3s; }
 
-      /* 上下两行自适应 Grid CSS */
       .global-stats { display: flex; flex-direction: column; gap: 15px; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.03); margin-bottom: 30px; text-align: center; box-sizing: border-box; width: 100%; }
       .stats-row { display: flex; justify-content: center; width: 100%; align-items: center; }
       .stats-row.bottom-row { border-top: 1px dashed rgba(150,150,150,0.2); padding-top: 15px; }
@@ -373,7 +370,6 @@ export default {
       const id = url.searchParams.get('id');
       if (!id) return new Response('Miss ID', { status: 400 });
       const server = await env.DB.prepare('SELECT * FROM servers WHERE id = ?').bind(id).first();
-      // 这里依然拦截，防止访客通过暴力枚举 ID 偷窥你的隐藏节点详情
       if (!server || server.is_hidden === 'true') return new Response('Not Found', { status: 404 });
       return new Response(JSON.stringify(server), { headers: { 'Content-Type': 'application/json' } });
     }
@@ -429,9 +425,9 @@ export default {
           const name = data.name || 'New Server';
           await env.DB.prepare(`
             INSERT INTO servers 
-            (id, name, cpu, ram, disk, load_avg, uptime, last_updated, ram_total, net_rx, net_tx, net_in_speed, net_out_speed, os, cpu_info, arch, boot_time, ram_used, swap_total, swap_used, disk_total, disk_used, processes, tcp_conn, udp_conn, country, ip_v4, ip_v6, server_group, price, expire_date, bandwidth, traffic_limit, ping_ct, ping_cu, ping_cm, ping_bd, monthly_rx, monthly_tx, last_rx, last_tx, reset_month, agent_os, history, is_hidden) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          `).bind(id, name, '0', '0', '0', '0', '0', 0, '0', '0', '0', '0', '0', '', '', '', '', '0', '0', '0', '0', '0', '0', '0', '0', '', '0', '0', '默认分组', '免费', '', '', '', '0', '0', '0', '0', '0', '0', '0', '0', '', data.agent_os || 'debian', '{}', 'false').run();
+            (id, name, cpu, ram, disk, load_avg, uptime, last_updated, ram_total, net_rx, net_tx, net_in_speed, net_out_speed, os, cpu_info, arch, boot_time, ram_used, swap_total, swap_used, disk_total, disk_used, processes, tcp_conn, udp_conn, country, ip_v4, ip_v6, server_group, price, expire_date, bandwidth, traffic_limit, ping_ct, ping_cu, ping_cm, ping_bd, monthly_rx, monthly_tx, last_rx, last_tx, reset_month, agent_os, history, is_hidden, reset_day) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).bind(id, name, '0', '0', '0', '0', '0', 0, '0', '0', '0', '0', '0', '', '', '', '', '0', '0', '0', '0', '0', '0', '0', '0', '', '0', '0', '默认分组', '免费', '', '', '', '0', '0', '0', '0', '0', '0', '0', '0', '', data.agent_os || 'debian', '{}', 'false', '1').run();
           return new Response(JSON.stringify({ success: true }), { headers: { 'Content-Type': 'application/json' } });
         } 
         else if (data.action === 'delete') {
@@ -440,8 +436,8 @@ export default {
         } 
         else if (data.action === 'edit') {
           await env.DB.prepare(`
-            UPDATE servers SET name = ?, server_group = ?, price = ?, expire_date = ?, bandwidth = ?, traffic_limit = ?, agent_os = ?, is_hidden = ? WHERE id = ?
-          `).bind(data.name || 'Unnamed', data.server_group || '默认分组', data.price || '', data.expire_date || '', data.bandwidth || '', data.traffic_limit || '', data.agent_os || 'debian', data.is_hidden || 'false', data.id).run();
+            UPDATE servers SET name = ?, server_group = ?, price = ?, expire_date = ?, bandwidth = ?, traffic_limit = ?, agent_os = ?, is_hidden = ?, reset_day = ? WHERE id = ?
+          `).bind(data.name || 'Unnamed', data.server_group || '默认分组', data.price || '', data.expire_date || '', data.bandwidth || '', data.traffic_limit || '', data.agent_os || 'debian', data.is_hidden || 'false', data.reset_day || '1', data.id).run();
           return new Response(JSON.stringify({ success: true }), { headers: { 'Content-Type': 'application/json' } });
         }
       } catch (e) {
@@ -455,7 +451,7 @@ export default {
     if (request.method === 'GET' && url.pathname === sys.admin_path) {
       if (!checkAuth(request)) return authResponse(sys.admin_title);
       
-      const { results } = await env.DB.prepare('SELECT id, name, last_updated, server_group, price, expire_date, bandwidth, traffic_limit, agent_os, is_hidden FROM servers').all();
+      const { results } = await env.DB.prepare('SELECT id, name, last_updated, server_group, price, expire_date, bandwidth, traffic_limit, agent_os, is_hidden, reset_day FROM servers').all();
       const now = Date.now();
       
       let trs = '';
@@ -479,7 +475,7 @@ export default {
               <td>
                 <input type="text" readonly value="${cmd}" style="width:260px; padding:6px; margin-right:5px; border:1px solid #ccc; border-radius:4px;" id="cmd-${s.id}">
                 <button onclick="copyCmd('${s.id}')" class="btn btn-green">复制命令</button>
-                <button onclick="openEditModal('${s.id}', '${s.name}', '${s.server_group||''}', '${s.price||''}', '${s.expire_date||''}', '${s.bandwidth||''}', '${s.traffic_limit||''}', '${osType}', '${s.is_hidden||'false'}')" class="btn btn-blue">✏️ 编辑</button>
+                <button onclick="openEditModal('${s.id}', '${s.name}', '${s.server_group||''}', '${s.price||''}', '${s.expire_date||''}', '${s.bandwidth||''}', '${s.traffic_limit||''}', '${osType}', '${s.is_hidden||'false'}', '${s.reset_day||'1'}')" class="btn btn-blue">✏️ 编辑</button>
                 <button onclick="deleteServer('${s.id}')" class="btn btn-red">🗑️ 删除</button>
               </td>
             </tr>
@@ -590,7 +586,7 @@ export default {
               
               <div class="checkbox-group" style="background:#fefce8; padding:8px; border-radius:6px; border:1px solid #fef08a; margin-bottom:15px;">
                 <input type="checkbox" id="cfg_auto_reset_traffic" ${sys.auto_reset_traffic === 'true' ? 'checked' : ''}>
-                <label for="cfg_auto_reset_traffic"><b>启用每月1号重置流量</b><br><span style="font-size:12px;color:#854d0e;font-weight:normal;">开启后大盘将计算自然月累计流量，且重启机器不会清零</span></label>
+                <label for="cfg_auto_reset_traffic"><b>启用流量按期重置 (全局总控开关)</b><br><span style="font-size:12px;color:#854d0e;font-weight:normal;">开启后，各节点将根据其独立设置的「重置日」自动清零流量。若关闭，则所有节点仅显示累计总流量。二者完美协同，不会冲突。</span></label>
               </div>
 
               <div class="checkbox-group">
@@ -711,6 +707,8 @@ export default {
             <label>分组名称</label> <input type="text" id="editGroup" placeholder="如：美国 VPS">
             <label>价格 (支持外币识别如: 10USD/月, 5EUR/年)</label> <input type="text" id="editPrice" placeholder="如：10USD/Year 或 免费">
             <label>到期时间</label> <input type="date" id="editExpire">
+            <label>每月流量重置日 (1-31) <span style="font-size: 12px; color: #ef4444; font-weight: normal;">(需在左侧开启全局重置总控)</span></label>
+            <input type="number" id="editResetDay" placeholder="1" min="1" max="31">
             <label>带宽 (前端徽章)</label> <input type="text" id="editBandwidth" placeholder="如：1Gbps 或 200Mbps">
             <label>流量总量 (前端徽章)</label> <input type="text" id="editTraffic" placeholder="如：1TB/月">
             <div style="text-align: right; margin-top: 10px;">
@@ -797,7 +795,7 @@ export default {
             input.select(); document.execCommand('copy');
             alert('✅ 安装命令已复制！去对应操作系统的 VPS 上执行即可。');
           }
-          function openEditModal(id, name, group, price, expire, bw, traffic, osType, isHidden) {
+          function openEditModal(id, name, group, price, expire, bw, traffic, osType, isHidden, resetDay) {
             document.getElementById('editId').value = id;
             document.getElementById('editName').value = name || '';
             document.getElementById('editHidden').value = isHidden === 'true' ? 'true' : 'false';
@@ -805,6 +803,7 @@ export default {
             document.getElementById('editGroup').value = group || '默认分组';
             document.getElementById('editPrice').value = price || '免费';
             document.getElementById('editExpire').value = expire || '';
+            document.getElementById('editResetDay').value = resetDay || '1';
             document.getElementById('editBandwidth').value = bw || '';
             document.getElementById('editTraffic').value = traffic || '';
             document.getElementById('editModal').style.display = 'block';
@@ -819,6 +818,7 @@ export default {
               server_group: document.getElementById('editGroup').value, price: document.getElementById('editPrice').value,
               expire_date: document.getElementById('editExpire').value, bandwidth: document.getElementById('editBandwidth').value,
               traffic_limit: document.getElementById('editTraffic').value,
+              reset_day: document.getElementById('editResetDay').value,
               is_hidden: document.getElementById('editHidden').value
             };
             const res = await fetch('${sys.admin_path}/api', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
@@ -1090,16 +1090,41 @@ echo "✅ Linux 探针安装成功！热重载功能已启用。"
         const nowTime = new Date();
         const tzOffset = 8 * 60 * 60000; 
         const localNow = new Date(nowTime.getTime() + tzOffset);
-        const currentMonthStr = `${localNow.getFullYear()}-${localNow.getMonth() + 1}`;
+        
+        // --- 核心：动态账单日周期计算逻辑 ---
+        let resetDayVal = parseInt(serverExists.reset_day) || 1;
+        if (resetDayVal < 1) resetDayVal = 1;
+        if (resetDayVal > 31) resetDayVal = 31;
+
+        let y = localNow.getFullYear();
+        let m = localNow.getMonth() + 1; // 1-12
+        let d = localNow.getDate();
+
+        // 识别当前月最后一天
+        let maxDaysThisMonth = new Date(y, m, 0).getDate();
+        let actualResetDayThisMonth = Math.min(resetDayVal, maxDaysThisMonth);
+
+        let currentCycleStr = '';
+        if (d < actualResetDayThisMonth) {
+            // 时间还未到本月的重置日，目前处于上一个月的计费周期
+            let pm = m - 1; let py = y;
+            if (pm === 0) { pm = 12; py -= 1; }
+            let maxDaysPrevMonth = new Date(py, pm, 0).getDate();
+            let actualResetDayPrevMonth = Math.min(resetDayVal, maxDaysPrevMonth);
+            currentCycleStr = `${py}-${pm}-${actualResetDayPrevMonth}`;
+        } else {
+            // 时间已经过了或等于本月重置日，进入本月的计费周期
+            currentCycleStr = `${y}-${m}-${actualResetDayThisMonth}`;
+        }
         
         let monthly_rx = parseFloat(serverExists.monthly_rx || '0');
         let monthly_tx = parseFloat(serverExists.monthly_tx || '0');
         let last_rx = parseFloat(serverExists.last_rx || '0');
         let last_tx = parseFloat(serverExists.last_tx || '0');
-        let reset_month = serverExists.reset_month || currentMonthStr;
+        let reset_month = serverExists.reset_month || currentCycleStr;
 
-        if (sys.auto_reset_traffic === 'true' && currentMonthStr !== reset_month) {
-            monthly_rx = 0; monthly_tx = 0; reset_month = currentMonthStr;
+        if (sys.auto_reset_traffic === 'true' && currentCycleStr !== reset_month) {
+            monthly_rx = 0; monthly_tx = 0; reset_month = currentCycleStr;
         }
 
         const current_rx = parseFloat(metrics.net_rx || '0');
@@ -1866,7 +1891,7 @@ echo "✅ Linux 探针安装成功！热重载功能已启用。"
               </div>
 
               <div class="g-item">
-                <div class="g-label">本机流量 (入 | 出) ${sys.auto_reset_traffic === 'true' ? '<span style="font-size:10px; color:#c2410c;">(本月)</span>' : ''}</div>
+                <div class="g-label">本机流量 (入 | 出) ${sys.auto_reset_traffic === 'true' ? '<span style="font-size:10px; color:#c2410c;">(按期)</span>' : ''}</div>
                 <div class="g-val">${formatBytes(globalNetRx)} | ${formatBytes(globalNetTx)}</div>
               </div>
             </div>
