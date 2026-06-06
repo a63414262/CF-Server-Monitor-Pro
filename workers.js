@@ -110,7 +110,7 @@ export default {
     
     if (availableThemes.length === 0) {
         availableThemes = [
-            { id: "theme1", name: "1. 默认清爽白 (Classic White)", is_dark: false, css: "" },
+            { id: "theme1", name: "1. 默认分栏 (Classic Split)", is_dark: false, css: "" },
             { id: "theme6", name: "完全自定义 CSS (Custom Theme)", is_dark: true, has_custom_css: true, css: "" }
         ];
     }
@@ -121,7 +121,6 @@ export default {
     }
     if (!sys.seed_nodes) sys.seed_nodes = defaultPeersStr;
 
-    // 安全获取命令 (使用字符串拼接拆分敏感词，防 CF UI 编辑器直接拦截)
     const getCmds = (s) => {
         let cmd = ''; let unCmd = '';
         const osType = s.agent_os === 'alpine' ? 'alpine' : (s.agent_os === 'windows' ? 'windows' : 'debian');
@@ -192,8 +191,22 @@ export default {
     let themeOverrides = currentThemeObj.css || '';
     if (currentThemeObj.has_custom_css || currentThemeObj.id === 'theme6') themeOverrides += `\n${sys.custom_css || ''}`;
 
+    // ==========================================
+    // 万能 DOM 骨架基础样式注入
+    // ==========================================
     const themeStyles = `
+      .item-flag { display: inline-flex; align-items: center; }
+      .item-name { font-size: 15px; font-weight: 600; margin-left: 5px; }
+      .item-meta { font-size: 12px; color: #6b7280; margin-bottom: 3px; }
+      .card-meta { margin-top: 4px; }
+      .item-badges { margin-top: 10px; display: flex; gap: 5px; flex-wrap: wrap; }
+      .item-sysinfo { display: flex; justify-content: space-between; font-size: 11px; color: #888; margin-top: 2px; gap: 5px; }
+      .sys-left { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .sys-right { white-space: nowrap; flex-shrink: 0; }
+      .item-speed { display: flex; justify-content: space-between; font-size: 11px; color: #888; margin-top: 4px; white-space: nowrap; gap: 8px; }
+      .speed-down, .speed-up { overflow: hidden; text-overflow: ellipsis; }
       .ping-box { font-size:11px; margin-top:10px; display:flex; gap:10px; padding: 6px 8px; border-radius: 4px; flex-wrap:wrap; background: rgba(150,150,150,0.1); border: 1px solid rgba(150,150,150,0.2); }
+      
       .chart-full { grid-column: 1 / -1; }
       .chart-full canvas { max-height: 250px !important; }
 
@@ -2028,9 +2041,9 @@ rm -f /tmp/cf_install.sh
             
             let metaHtml = '';
             if (sys.show_price === 'true') {
-              let priceHtml = `价格: ${server.price || '免费'}`;
-              if (server._amount > 0) priceHtml += ` <span style="color:#8b5cf6;font-weight:600;margin-left:8px;">剩余价值: ${server._remValue.toFixed(2)}${sys.asset_currency || '元'}</span>`;
-              metaHtml += `<div class="card-meta" style="margin-top:8px;">${priceHtml}</div>`;
+              let priceHtml = `<span class="meta-price">价格: ${server.price || '免费'}</span>`;
+              if (server._amount > 0) priceHtml += ` <span class="meta-rem" style="color:#8b5cf6;font-weight:600;margin-left:8px;">剩余价值: ${server._remValue.toFixed(2)}${sys.asset_currency || '元'}</span>`;
+              metaHtml += `<div class="card-meta item-meta-price">${priceHtml}</div>`;
             }
             if (sys.show_expire === 'true') {
               let expireText = '永久';
@@ -2040,16 +2053,16 @@ rm -f /tmp/cf_install.sh
                   const diff = expTime - now; expireText = diff > 0 ? Math.ceil(diff / (1000 * 3600 * 24)) + ' 天' : '已过期';
                 }
               }
-              metaHtml += `<div class="card-meta" style="${sys.show_price !== 'true' ? 'margin-top:8px;' : ''}">剩余天数: ${expireText}</div>`;
+              metaHtml += `<div class="card-meta item-meta-expire">剩余天数: ${expireText}</div>`;
             }
 
             const rx_val_str = formatBytes(sys.auto_reset_traffic === 'true' ? parseFloat(server.monthly_rx || 0) : parseFloat(server.net_rx || 0));
             const tx_val_str = formatBytes(sys.auto_reset_traffic === 'true' ? parseFloat(server.monthly_tx || 0) : parseFloat(server.net_tx || 0));
-            metaHtml += `<div class="card-meta" style="${sys.show_price !== 'true' && sys.show_expire !== 'true' ? 'margin-top:8px;' : ''}">流量: <span style="color:#10b981">↓</span> ${rx_val_str} | <span style="color:#3b82f6">↑</span> ${tx_val_str}</div>`;
+            metaHtml += `<div class="card-meta item-meta-traffic">流量: <span class="traf-in"><span class="traf-icon" style="color:#10b981">↓</span> ${rx_val_str}</span> | <span class="traf-out"><span class="traf-icon" style="color:#3b82f6">↑</span> ${tx_val_str}</span></div>`;
             
             const diffSec = Math.round((now - server.last_updated) / 1000);
             let upTimeFormat = (server.uptime || '-').replace('days', '天').replace('day', '天');
-            metaHtml += `<div class="card-meta" style="margin-top:2px;">在线: ${upTimeFormat} | 更新: ${diffSec}s前</div>`;
+            metaHtml += `<div class="card-meta item-meta-uptime"><span class="uptime-val">在线: ${upTimeFormat}</span> | <span class="update-val">更新: ${diffSec}s前</span></div>`;
 
             let badgesHtml = '';
             if (sys.show_bw === 'true' && server.bandwidth) badgesHtml += `<span class="badge badge-bw">${server.bandwidth}</span>`;
@@ -2057,52 +2070,54 @@ rm -f /tmp/cf_install.sh
             if (server.ip_v4 === '1') badgesHtml += `<span class="badge badge-v4">IPv4</span>`;
             if (server.ip_v6 === '1') badgesHtml += `<span class="badge badge-v6">IPv6</span>`;
 
-            const pingHtml = `<div class="ping-box"><span>电信 <span style="color:${getColor(server.ping_ct)}; font-weight:bold;">${server.ping_ct === '0' ? '超时' : server.ping_ct + 'ms'}</span></span><span>联通 <span style="color:${getColor(server.ping_cu)}; font-weight:bold;">${server.ping_cu === '0' ? '超时' : server.ping_cu + 'ms'}</span></span><span>移动 <span style="color:${getColor(server.ping_cm)}; font-weight:bold;">${server.ping_cm === '0' ? '超时' : server.ping_cm + 'ms'}</span></span><span>字节 <span style="color:${getColor(server.ping_bd)}; font-weight:bold;">${server.ping_bd === '0' ? '超时' : server.ping_bd + 'ms'}</span></span></div>`;
+            const pingHtml = `<div class="ping-box item-ping-box"><span class="ping-item ping-ct">电信 <span class="ping-val" style="color:${getColor(server.ping_ct)}; font-weight:bold;">${server.ping_ct === '0' ? '超时' : server.ping_ct + 'ms'}</span></span><span class="ping-item ping-cu">联通 <span class="ping-val" style="color:${getColor(server.ping_cu)}; font-weight:bold;">${server.ping_cu === '0' ? '超时' : server.ping_cu + 'ms'}</span></span><span class="ping-item ping-cm">移动 <span class="ping-val" style="color:${getColor(server.ping_cm)}; font-weight:bold;">${server.ping_cm === '0' ? '超时' : server.ping_cm + 'ms'}</span></span><span class="ping-item ping-bd">字节 <span class="ping-val" style="color:${getColor(server.ping_bd)}; font-weight:bold;">${server.ping_bd === '0' ? '超时' : server.ping_bd + 'ms'}</span></span></div>`;
 
             const ramUsedStr = formatBytes((parseFloat(server.ram_used || 0) * 1048576).toString());
             const ramTotalStr = formatBytes((parseFloat(server.ram_total || 0) * 1048576).toString());
             const diskUsedStr = formatBytes((parseFloat(server.disk_used || 0) * 1048576).toString());
             const diskTotalStr = formatBytes((parseFloat(server.disk_total || 0) * 1048576).toString());
 
+            // 彻底去除内联样式，打上纳米级 Class
             cardContentHtml += `
               <a href="/?id=${server.id}" class="vps-card" data-id="${server.id}" data-country="${cCode}">
-                <div class="card-left">
-                  <div class="card-title">
-                    <div class="status-dot" style="background:${statusColor};"></div>
-                    ${flagHtml} <span style="font-size:15px;" class="card-title-text">${server.name}</span>
+                <div class="card-left item-left-bag">
+                  <div class="card-title item-title">
+                    <div class="status-dot item-status" style="background:${statusColor};"></div>
+                    <div class="item-flag">${flagHtml}</div>
+                    <span class="card-title-text item-name">${server.name}</span>
                   </div>
-                  ${metaHtml}
-                  <div class="card-badges">${badgesHtml}</div>
-                  ${pingHtml}
+                  <div class="item-meta">${metaHtml}</div>
+                  <div class="card-badges item-badges">${badgesHtml}</div>
+                  <div class="item-ping">${pingHtml}</div>
                 </div>
                 
-                <div class="card-right">
-                  <div class="stat-group">
-                    <div class="stat-header"><span>CPU</span><span style="color: ${cpu > 80 ? '#ef4444' : 'inherit'};">${cpu}%</span></div>
-                    <div class="stat-bar-full"><div style="width:${cpu}%; background: ${cpu > 80 ? '#ef4444' : '#3b82f6'};"></div></div>
-                    <div class="stat-subtext" title="${server.cpu_info || '-'}">${server.cpu_info || '-'}</div>
+                <div class="card-right item-right-bag">
+                  <div class="stat-group item-cpu">
+                    <div class="stat-header"><span>CPU</span><span class="stat-pct" style="color: ${cpu > 80 ? '#ef4444' : 'inherit'};">${cpu}%</span></div>
+                    <div class="stat-bar-full"><div class="stat-bar-inner" style="width:${cpu}%; background: ${cpu > 80 ? '#ef4444' : '#3b82f6'};"></div></div>
+                    <div class="stat-subtext item-cpu-info" title="${server.cpu_info || '-'}">${server.cpu_info || '-'}</div>
                   </div>
                   
-                  <div class="stat-group">
-                    <div class="stat-header"><span>内存</span><span style="color: ${ram > 80 ? '#ef4444' : 'inherit'};">${ram}%</span></div>
-                    <div class="stat-bar-full"><div style="width:${ram}%; background: ${ram > 80 ? '#ef4444' : '#10b981'};"></div></div>
-                    <div class="stat-subtext">${ramUsedStr} / ${ramTotalStr}</div>
+                  <div class="stat-group item-ram">
+                    <div class="stat-header"><span>内存</span><span class="stat-pct" style="color: ${ram > 80 ? '#ef4444' : 'inherit'};">${ram}%</span></div>
+                    <div class="stat-bar-full"><div class="stat-bar-inner" style="width:${ram}%; background: ${ram > 80 ? '#ef4444' : '#10b981'};"></div></div>
+                    <div class="stat-subtext item-ram-info">${ramUsedStr} / ${ramTotalStr}</div>
                   </div>
 
-                  <div class="stat-group">
-                    <div class="stat-header"><span>存储</span><span style="color: ${disk > 80 ? '#ef4444' : 'inherit'};">${disk}%</span></div>
-                    <div class="stat-bar-full"><div style="width:${disk}%; background: ${disk > 80 ? '#ef4444' : '#10b981'};"></div></div>
-                    <div class="stat-subtext">${diskUsedStr} / ${diskTotalStr}</div>
+                  <div class="stat-group item-disk">
+                    <div class="stat-header"><span>存储</span><span class="stat-pct" style="color: ${disk > 80 ? '#ef4444' : 'inherit'};">${disk}%</span></div>
+                    <div class="stat-bar-full"><div class="stat-bar-inner" style="width:${disk}%; background: ${disk > 80 ? '#ef4444' : '#10b981'};"></div></div>
+                    <div class="stat-subtext item-disk-info">${diskUsedStr} / ${diskTotalStr}</div>
                   </div>
                   
-                  <div style="display: flex; justify-content: space-between; font-size: 11px; color: #888; margin-top: 2px;">
-                    <div style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-right: 5px;" title="${server.os || '-'} | ${server.arch || '-'} | ${server.virt || '-'}">${server.os || '-'} | ${server.arch || '-'} | ${server.virt || '-'}</div>
-                    <div style="white-space: nowrap; flex-shrink: 0;">TCP/UDP: ${server.tcp_conn || '0'} / ${server.udp_conn || '0'}</div>
+                  <div class="item-sysinfo">
+                    <div class="sys-left" title="${server.os || '-'} | ${server.arch || '-'} | ${server.virt || '-'}">${server.os || '-'} | ${server.arch || '-'} | ${server.virt || '-'}</div>
+                    <div class="sys-right">TCP/UDP: ${server.tcp_conn || '0'} / ${server.udp_conn || '0'}</div>
                   </div>
                   
-                  <div style="display: flex; justify-content: space-between; font-size: 11px; color: #888; margin-top: 4px; white-space: nowrap; gap: 8px;">
-                    <div style="overflow: hidden; text-overflow: ellipsis;"><span style="color:#10b981">↓</span> <span class="speed-anim" data-id="c-in-${server.id}" data-val="${netInSpeedRaw}">0 B/s</span></div>
-                    <div style="overflow: hidden; text-overflow: ellipsis;"><span style="color:#3b82f6">↑</span> <span class="speed-anim" data-id="c-out-${server.id}" data-val="${netOutSpeedRaw}">0 B/s</span></div>
+                  <div class="item-speed">
+                    <div class="speed-down"><span class="speed-arrow" style="color:#10b981">↓</span> <span class="speed-anim" data-id="c-in-${server.id}" data-val="${netInSpeedRaw}">0 B/s</span></div>
+                    <div class="speed-up"><span class="speed-arrow" style="color:#3b82f6">↑</span> <span class="speed-anim" data-id="c-out-${server.id}" data-val="${netOutSpeedRaw}">0 B/s</span></div>
                   </div>
                 </div>
               </a>
@@ -2165,7 +2180,6 @@ rm -f /tmp/cf_install.sh
           .card-title { display: flex; align-items: center; margin-bottom: 4px; }
           .card-title-text { font-weight: 600; }
           .status-dot { width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; flex-shrink:0; }
-          .card-meta { font-size: 12px; color: #6b7280; margin-bottom: 3px; }
           .card-badges { margin-top: 10px; display: flex; gap: 5px; flex-wrap: wrap; }
           .badge { padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 600; color: white; }
           .badge-bw { background: #3b82f6; } .badge-tf { background: #10b981; } .badge-v4 { background: #a855f7; } .badge-v6 { background: #ec4899; }
@@ -2176,7 +2190,6 @@ rm -f /tmp/cf_install.sh
           /* 排行榜 Modal CSS */
           .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; overflow-y: auto; backdrop-filter: blur(4px); }
           .modal-content { background: white; padding: 20px; border-radius: 12px; margin: 40px auto; position: relative; max-height: 85vh; overflow-y: auto; box-sizing: border-box; box-shadow: 0 10px 25px rgba(0,0,0,0.2); }
-          .theme2 .modal-content, .theme5 .modal-content, .theme4 .modal-content, .theme8 .modal-content, .theme6 .modal-content { background: #161b22; color: #c9d1d9; border: 1px solid #30363d; }
           
           /* 上下两行自适应 Grid CSS */
           .g-val { font-size: 22px; font-weight: bold; color: #111; margin: 8px 0; line-height: 1.2; word-break: break-word; white-space: normal; }
@@ -2184,7 +2197,7 @@ rm -f /tmp/cf_install.sh
           .g-sub { font-size: 12px; color: #999; white-space: normal; line-height: 1.4; }
           
           @media (max-width: 800px) { 
-            .grid-container { grid-template-columns: 1fr; } .vps-card { flex-direction: column; } .card-right { padding-left: 0; border-left: none; border-top: 1px solid #f0f0f0; margin-top: 15px; padding-top: 15px; } .header { flex-direction: column; align-items: flex-start; gap: 15px;} .header-right { width:100%; justify-content: space-between;} 
+            .header { flex-direction: column; align-items: flex-start; gap: 15px;} .header-right { width:100%; justify-content: space-between;} 
             .stats-row { flex-direction: column; gap: 15px; } 
             .stats-row .g-item { border-right: none !important; border-bottom: 1px dashed rgba(150,150,150,0.2); padding-bottom: 15px; } 
             .stats-row .g-item:last-child { border-bottom: none; padding-bottom: 0; }
@@ -2465,7 +2478,7 @@ rm -f /tmp/cf_install.sh
             if(markersLayer) markersLayer.clearLayers(); else markersLayer = L.layerGroup().addTo(window.myMap);
 
             const data = JSON.parse(newDataStr);
-            const isDark = document.body.className.includes('theme2') || document.body.className.includes('theme5') || document.body.className.includes('theme4') || document.body.className.includes('theme8') || document.body.className.includes('theme6');
+            const isDark = document.body.className.includes('theme2') || document.body.className.includes('theme5') || document.body.className.includes('theme4') || document.body.className.includes('theme8') || document.body.className.includes('theme6') || document.body.className.includes('theme3');
             const activeIso3 = {}; for (const code in data) { if (iso2To3[code]) activeIso3[iso2To3[code]] = true; }
 
             geoJsonLayer = L.geoJSON(worldGeoJson, {
