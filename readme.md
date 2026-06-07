@@ -1,7 +1,8 @@
 # 功能越来越多了可以按需开启   
 
 只想简单探针可以不用个性化的CSS代码，直接用默认主题就行，个性化CSS设置才是本探针创建的初心，功能可以不用，但必须要有，未来还会继续不断增加新的功能进去，你不需要的功能不代表别人不需要
-# 新人一键极速部署/老用户直接覆盖代码升级  已支持电报机器人管理后台
+# 新人一键极速部署/老用户直接覆盖代码升级  
+已支持电报机器人管理后台
 
 [![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/a63414262/CF-Server-Monitor-Pro)
 
