@@ -1514,7 +1514,6 @@ rm -f /tmp/cf_install.sh
         if (secret !== env.API_SECRET) return new Response('Unauthorized', { status: 401 });
 
         let countryCode = request.cf && request.cf.country ? request.cf.country : 'XX';
-        if (countryCode.toUpperCase() === 'TW') countryCode = 'CN';
 
         const serverExists = await env.DB.prepare('SELECT * FROM servers WHERE id = ?').bind(id).first();
         if (!serverExists) return new Response('Server not found', { status: 404 });
@@ -1720,7 +1719,6 @@ rm -f /tmp/cf_install.sh
         groups[grpName].push(server);
 
         let cCodeMap = (server.country || 'xx').toUpperCase();
-        if (cCodeMap === 'TW') cCodeMap = 'CN';
         if (cCodeMap !== 'XX') countryStats[cCodeMap] = (countryStats[cCodeMap] || 0) + 1;
       }
     }
@@ -1737,7 +1735,8 @@ rm -f /tmp/cf_install.sh
         if (!server || server.is_hidden === 'true') return new Response('Server Not Found', { status: 404 });
         
         const cCode = (server.country || 'xx').toLowerCase();
-        const flagHtml = cCode !== 'xx' ? `<img src="https://flagcdn.com/24x18/${cCode}.png" alt="${cCode}" style="vertical-align: middle; margin-right: 8px; border-radius: 3px;">` : '🏳️';
+        const flagCode = cCode === 'tw' ? 'cn' : cCode;
+        const flagHtml = flagCode !== 'xx' ? `<img src="https://flagcdn.com/24x18/${flagCode}.png" alt="${flagCode}" style="vertical-align: middle; margin-right: 8px; border-radius: 3px;">` : '🏳️';
         const isOnline = (Date.now() - server.last_updated) < offlineThresMs;
         const statusHtml = isOnline ? '<span style="background:#10b981; color:white; padding:2px 8px; border-radius:12px; font-size:12px; font-weight:bold;">在线</span>' : '<span style="background:#ef4444; color:white; padding:2px 8px; border-radius:12px; font-size:12px; font-weight:bold;">离线</span>';
 
@@ -2074,9 +2073,9 @@ rm -f /tmp/cf_install.sh
             const netInSpeedRaw = parseFloat(server.net_in_speed) || 0;
             const netOutSpeedRaw = parseFloat(server.net_out_speed) || 0;
             
-            let cCode = (server.country || 'xx').toLowerCase();
-            if (cCode.toUpperCase() === 'TW') cCode = 'cn';
-            const flagHtml = cCode !== 'xx' ? `<img src="https://flagcdn.com/24x18/${cCode}.png" alt="${cCode}" style="vertical-align: sub; margin-right: 5px; border-radius: 2px;">` : '🏳️';
+            const cCode = (server.country || 'xx').toLowerCase();
+            const flagCode = cCode === 'tw' ? 'cn' : cCode;
+            const flagHtml = flagCode !== 'xx' ? `<img src="https://flagcdn.com/24x18/${flagCode}.png" alt="${flagCode}" style="vertical-align: sub; margin-right: 5px; border-radius: 2px;">` : '🏳️';
             
             let metaHtml = '';
             if (sys.show_price === 'true') {
@@ -2544,7 +2543,18 @@ rm -f /tmp/cf_install.sh
 
             const data = JSON.parse(newDataStr);
             const isDark = document.body.className.includes('theme2') || document.body.className.includes('theme5') || document.body.className.includes('theme4') || document.body.className.includes('theme8') || document.body.className.includes('theme6');
-            const activeIso3 = {}; for (const code in data) { if (iso2To3[code]) activeIso3[iso2To3[code]] = true; }
+            const activeIso3 = {}; 
+            for (const code in data) { 
+               if (iso2To3[code]) activeIso3[iso2To3[code]] = true; 
+            }
+            
+            // 核心修复：领土完整性映射。只要命中中国大陆、台湾、香港或澳门任意一处，共同点亮整个中国版图
+            if (activeIso3['CHN'] || activeIso3['TWN'] || activeIso3['HKG'] || activeIso3['MAC']) {
+                activeIso3['CHN'] = true;
+                activeIso3['TWN'] = true;
+                activeIso3['HKG'] = true;
+                activeIso3['MAC'] = true;
+            }
 
             geoJsonLayer = L.geoJSON(worldGeoJson, {
                 style: function(feature) {
