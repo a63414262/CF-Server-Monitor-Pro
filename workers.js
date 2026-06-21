@@ -2052,7 +2052,9 @@ rm -f /tmp/cf_install.sh
 
       let filterTagsHtml = `<span class="filter-tag" data-code="all" onclick="setFilter('all')">全部 ${visibleServersCount}</span>`;
       for (const [code, count] of Object.entries(countryStats)) {
-          filterTagsHtml += `<span class="filter-tag" data-code="${code.toLowerCase()}" onclick="setFilter('${code.toLowerCase()}')"><img src="https://flagcdn.com/16x12/${code.toLowerCase()}.png" alt="${code}"> ${code} ${count}</span>`;
+          const lowerCode = code.toLowerCase();
+          const flagCode = lowerCode === 'tw' ? 'cn' : lowerCode; // 仅替换旗帜图片为五星红旗
+          filterTagsHtml += `<span class="filter-tag" data-code="${lowerCode}" onclick="setFilter('${lowerCode}')"><img src="https://flagcdn.com/16x12/${flagCode}.png" alt="${code}"> ${code} ${count}</span>`;
       }
 
       let cardContentHtml = ''; let tableBodyHtml = '';
