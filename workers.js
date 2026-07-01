@@ -89,8 +89,8 @@ export default {
       custom_bg: '', custom_css: '', custom_head: '', custom_script: '', 
       is_public: 'true', show_price: 'true', show_expire: 'true', show_bw: 'true', show_tf: 'true', show_admin_btn: 'true',
       admin_path: '/admin', asset_currency: '元', seed_nodes: '', tg_notify: 'false', tg_bot_token: '', tg_chat_id: '',
-      auto_reset_traffic: 'false', report_interval: '5', ping_node_ct: 'default', ping_node_cu: 'default', ping_node_cm: 'default',
-      offline_threshold: '30', alert_threshold: '120',
+      auto_reset_traffic: 'false', report_interval: '40', ping_node_ct: 'default', ping_node_cu: 'default', ping_node_cm: 'default',
+      offline_threshold: '90', alert_threshold: '150',
       enable_popup: 'false', popup_content: '<h3>📢 公告</h3><p>欢迎来到 Server Monitor Pro！<br>这是自定义弹窗内容，支持 HTML 排版。</p>'
     };
 
