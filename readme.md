@@ -1,3 +1,7 @@
+CF探针pro版本已经集成进KUI
+
+https://github.com/a6216abcd/K-UI/tree/dev
+
 ## 🚀 快速部署与使用
 
 ### 第一步：一键部署到 Cloudflare
